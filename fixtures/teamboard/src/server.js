@@ -1,0 +1,11 @@
+const express = require("express");
+const { requireAuth } = require("./middleware/auth");
+const app = express();
+app.use(express.json());
+app.use("/api/public", require("./routes/public"));
+app.use("/api/invite", require("./routes/invite"));
+app.use("/api/reports", requireAuth, require("./routes/reports"));
+app.use("/api/search", requireAuth, require("./routes/search"));
+app.use("/api/webhooks", requireAuth, require("./routes/webhooks"));
+app.use("/api/notes", requireAuth, require("./routes/notes"));
+app.listen(process.env.PORT || 3000);

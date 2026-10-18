@@ -1,0 +1,60 @@
+# Security Swarm configuration.
+#
+# Copy this file to `swarm.toml` and fill in the five model blocks. Every role pins its own
+# model/provider/reasoning and runs as an isolated one-shot, so a wrong or missing provider
+# fails the run loudly instead of silently degrading it to something weaker.
+#
+# Tiering that works well in practice:
+#   planner  = your strongest model (it writes the threat model and the search rules once)
+#   mapper   = a cheap, fast model (many parallel per-batch workers)
+#   refute   = the same cheap/fast tier as the mapper (one refuter per mapper report)
+#   reducer  = a strong model (it reconciles every raw finding and builds cross-file chains)
+#   verify   = a strong model, one fresh agent per claim (the trust layer)
+#
+# The model names below are placeholders. Use the exact identifier your provider expects
+# (some relay/aggregator providers reject a bare model name and need a namespaced one).
+
+[models.planner]
+model = "<strong-model>"
+provider = "<provider>"
+reasoning = "high"
+run_budget_s = 1800
+
+[models.mapper]
+model = "<fast-model>"
+provider = "<provider>"
+reasoning = "high"
+run_budget_s = 900
+
+[models.refute]           # ONE REFUTER AGENT PER MAPPER REPORT (per batch), before the reduce
+model = "<fast-model>"
+provider = "<provider>"
+reasoning = "high"
+run_budget_s = 1800
+
+[models.reducer]
+model = "<strong-model>"
+provider = "<provider>"
+reasoning = "high"
+run_budget_s = 3000      # size to the finding count: one big scan (70 findings, ~180 KB prompt)
+                         # needs far more headroom than a 5-batch self-test
+
+[models.verify]           # ONE FRESH AGENT PER CLAIM (each finding + each chain), after the reduce
+model = "<strong-model>"
+provider = "<provider>"
+reasoning = "high"
+run_budget_s = 900
+
+[scan]
+batch_size = 5            # files with signals per map worker
+concurrency = 8           # parallel agents (map, refute and verify all use this)
+max_signals_per_file = 40 # signal lines shown to a worker per file (it can read the whole file)
+data_dir = "./scans"
+
+# Registered repos. `aliases` are what you may type; `ask = false` keeps a repo out of the
+# daily readiness question (the self-test fixture does this). Paths may be relative.
+[repos.selftest]
+path = "./fixtures/teamboard"
+aliases = ["selftest"]
+notes = "Self-test fixture: Express + SQLite multi-team API with five planted bugs (SQLi, path traversal, SSRF, hardcoded JWT secret fallback, unauthenticated invite-token disclosure that chains into admin takeover). Safe decoy file included. Run `fixtures/setup.sh` once to make it a git repo (the planner snapshots committed HEAD)."
+ask = false
