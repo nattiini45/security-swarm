@@ -54,8 +54,7 @@ verifier yields `unverified`, never `confirmed`).
 ├── swarm.py              deterministic engine: snapshot, shard, cache, digest, rank, render
 ├── swarm.toml            repos, roles (agent + model per role), scan settings
 ├── prompts/              plan / map / refute / reduce / verify templates
-├── fixtures/teamboard/   self-test repo with five planted bugs
-└── tools/                (runtime) ripgrep
+└── fixtures/teamboard/   self-test repo with five planted bugs
 ```
 
 Runtime data (scans, caches, prompts, ripgrep) lives in `~/.minimax/security-swarm/`.

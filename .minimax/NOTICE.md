@@ -6,7 +6,7 @@ This directory holds the **MiniMax Code port** of Security Swarm.
 - Pinned commit: `1444ab57ccf5fefbe55a713457f05e5ff9963b69` (2026-10-18, the repository's only commit)
 - Upstream layout: repository root (`swarm.py`, `prompts/`, `fixtures/`, `swarm.example.toml`)
 - Port layout: this directory (`.minimax/`)
-- License: MIT — see `LICENSE` in this directory (the same text as the repository root)
+- License: MIT — see `LICENSE` in this directory (the same MIT text; the copyright line names the public handle)
 - Port date: 2026-10-19 … 2026-10-22
 
 The upstream and this port are the same project by the same author
@@ -42,8 +42,9 @@ Each stage is now a pair: `<stage>-begin` writes a prompt file and prints a JSON
 runs the child agents and writes each reply into the task's `out` file; `<stage>-ingest` parses
 them and advances the scan. Everything is cached and resumable.
 
-Added commands that upstream does not have: `roles` (report the configured agent + model per
-role) and `fixture-init` (materialize the test fixture).
+Added commands that upstream does not have: `bootstrap`, `report`, `roles` (report the configured agent
++ model per role) and `fixture-init` (materialize the test fixture). `status`, `ask` and `repos` are carried
+over from upstream.
 
 ### 3. Configuration
 
@@ -53,8 +54,8 @@ role) and `fixture-init` (materialize the test fixture).
 | `[models.*]` — a model id per role | `[roles.*]` — an **agent** and a model per role |
 | `run_budget_s` — an engine-side wall-clock cap | Not ported: the host-driven design replaces it with the child agent's own time and context budget, which the host enforces |
 
-The port's `swarm.toml` also pins the data directory to `~/.minimax/security-swarm` and records the
-bootstrapped `rg_path`.
+The port's `swarm.toml` also pins the data directory to `~/.minimax/security-swarm` and leaves `rg_path`
+empty, so the engine falls back to the ripgrep it bootstrapped into the data directory, then to `PATH`.
 
 ### 4. Platform
 
@@ -63,8 +64,8 @@ bootstrapped `rg_path`.
   system-wide install.
 - **Tool names in the prompts**: the prompts address MiniMax Code tools (`read`, `glob`, `grep`)
   instead of the upstream host's tool names.
-- The port ships the **`teamboard-hardened`** fixture, which upstream does not have — a deliberately
-  vulnerable-by-design fixture used to prove the scanner actually finds things.
+- The port ships the **`teamboard-hardened`** fixture, which upstream does not have — the hardened
+  twin of the vulnerable self-test fixture (every finding fixed), shipped as a precision test: the scanner must not flag it.
 
 ### 5. What was *not* ported
 
