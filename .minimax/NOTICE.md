@@ -76,6 +76,5 @@ the digest cache, the P0–P3 severities, the git-archive snapshot, the dirty-tr
 
 ## Live install
 
-The port is installed as a global skill at
-`C:\Users\Caspar\.minimax\skills\security-swarm\` and appears in the skill catalog as
-`security-swarm`. This directory is the source of truth for that install.
+The port is installed as a global skill at `~/.minimax/skills/security-swarm/` and appears in the
+skill catalog as `security-swarm`. This directory is the source of truth for that install.
