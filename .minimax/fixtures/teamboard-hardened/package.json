@@ -1,0 +1,18 @@
+{
+  "name": "teamboard-hardened",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hardened reference implementation of the teamboard self-test fixture. Not deployable.",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.1",
+    "express": "^4.19.0",
+    "jsonwebtoken": "^9.0.0"
+  }
+}
