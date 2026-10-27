@@ -1,0 +1,56 @@
+# Security Swarm — live configuration (MiniMax Code / Windows).
+#
+# The pipeline is host-driven: this file tells the Mavis host agent which child
+# agent type and model to spawn per role. No API keys, no tokens, no provider
+# endpoints — the runtime owns authentication.
+
+[scan]
+batch_size = 5            # files with signals per map worker
+concurrency = 4           # max parallel child agents the host may run at once
+max_signals_per_file = 40 # signal lines shown to a worker per file (it can read the whole file)
+data_dir = "~/.minimax/security-swarm"   # scans, caches and tools live here
+rg_path = ""              # explicit ripgrep path; empty = bundled, then PATH
+
+# One child agent per role. `agent` is a Mavis agent type (explore = read-only).
+# `model` is a source-qualified model key (<provider>/<model>).
+#
+# Everything currently runs on M3.1-Flash. To promote a role to the stronger
+# model, change only that role's `model` line — e.g. "minimax/MiniMax-M3".
+
+[roles.planner]
+agent = "worker"
+model = "minimax/MiniMax-M3.1-Flash"
+
+[roles.mapper]
+agent = "worker"
+model = "minimax/MiniMax-M3.1-Flash"
+
+[roles.refute]
+agent = "worker"
+model = "minimax/MiniMax-M3.1-Flash"
+
+[roles.reducer]
+agent = "worker"
+model = "minimax/MiniMax-M3.1-Flash"
+
+[roles.verify]
+agent = "worker"
+model = "minimax/MiniMax-M3.1-Flash"
+
+# Registered repos. `aliases` are what you may type; `ask = false` keeps a repo out of the
+# daily readiness question. Relative paths resolve against this skill directory.
+[repos.selftest]
+path = "./fixtures/teamboard"
+aliases = ["selftest"]
+notes = "Self-test fixture: Express + SQLite multi-team API with five planted bugs (SQLi, path traversal, SSRF, hardcoded JWT secret fallback, unauthenticated invite-token disclosure that chains into admin takeover). Safe decoy file included. Run `fixtures/setup.ps1` once to make it a git repo (the planner snapshots committed HEAD)."
+ask = false
+
+# Precision test: the hardened twin of the self-test fixture, with every
+# finding from the self-test report fixed. A clean run must report NO findings.
+# Anything it reports is a false positive, not a real bug - use this to check
+# that the scanner does not invent findings on correct code.
+[repos.hardened]
+path = "./fixtures/teamboard-hardened"
+aliases = ["hardened"]
+notes = "Hardened reference build of the teamboard fixture. Every finding from the self-test report is fixed: no fallback signing key, hashed single-use invitations, parameterised SQL, path-contained report download, outbound URL guard for webhooks, server-side sessions with revocation, DB-authoritative admin checks, rate limiting, security headers and a central error handler. Scanning it is a PRECISION test - a clean run reports no findings. Residual risks that are documented rather than fixed (mailbox verification, DNS-rebinding TOCTOU, in-process rate limits) are listed in its README."
+ask = false
