@@ -411,7 +411,8 @@ def make_snapshot(repo_path: str, dest: Path, ref: str = "HEAD") -> dict:
                                capture_output=True, check=True).stdout
     dest.mkdir(parents=True, exist_ok=True)
     with tarfile.open(fileobj=io.BytesIO(tar_bytes)) as tf:
-        tf.extractall(dest, filter="data")
+        # filter="data" (PEP 706) rejects absolute paths, ".." and links leaving dest; the tar is git archive output.
+        tf.extractall(dest, filter="data")  # nosemgrep: trailofbits.python.tarfile-extractall-traversal
     return {"commit": commit, "branch": branch, "uncommitted_changes_excluded": len(dirty)}
 
 
