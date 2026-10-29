@@ -102,14 +102,18 @@ launch the next. A full scan of a small repo is roughly one wave per stage.
    `unverified`, never `confirmed`.
    - `verify-begin` / `verify-ingest` can be re-run to redo only missing or changed claims.
 
-8. **Report.** Summarize `report.md`: coverage line, P0–P3 counts, chains, top findings with
-   file:line, failed batches as coverage gaps, and the **Verification** line
+8. **Report.** Summarize `report.md`: coverage line plus the **Not reviewed** count, P0–P3 counts,
+   chains, top findings with file:line, failed batches as coverage gaps, the **Unvalidated** leads
+   with their missing facts, and the **Verification** line
    (confirmed / unverified / refuted). Offer fix tasks per finding; never auto-fix.
 
 ## Pitfalls
 
 - **Coverage is selector recall.** A file no selector matches is never investigated. Read the
-  selector table before approving a plan.
+  selector table before approving a plan. Then read the report's **Not reviewed** / **Scope of this
+  run** lines (`coverage-ledger.json`, `coverage <scan>`) and pass them on: unreviewed is not clean.
+- **Unvalidated is not a severity.** Claims that hinge on a fact outside the repo carry no priority
+  and a named `missing_fact`; report them as open questions, never fold them into P0–P3.
 - **A failed reduce falls back to raw, undeduplicated worker findings.** The report says
   `REDUCER FAILED` in the Summary: P0–P3 counts are then not authoritative and one issue repeats
   once per batch. Re-run the reduce (map is cached) instead of presenting duplicates as separate

@@ -10,6 +10,8 @@ concurrency = 4           # max parallel child agents the host may run at once
 max_signals_per_file = 40 # signal lines shown to a worker per file (it can read the whole file)
 data_dir = "~/.minimax/security-swarm"   # scans, caches and tools live here
 rg_path = ""              # explicit ripgrep path; empty = bundled, then PATH
+playbook_max_companions = 2   # domain attack-class files injected per map batch (the core file is always in)
+playbook_max_chars = 60000    # hard cap on the injected attack-class playbook
 
 # One child agent per role. `agent` is a Mavis agent type (explore = read-only).
 # `model` is a source-qualified model key (<provider>/<model>).

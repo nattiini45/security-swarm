@@ -27,6 +27,19 @@ IDs or tokens, or code that is safe only if its caller authenticates) as low-con
 SEVERITY CRITERIA
 {severity_criteria}
 
+Severity requires demonstrated impact
+Every finding you report needs a concrete, owner-observable result, not a deviation from good
+practice: name the lower-trust principal, the accepted input, the intended control, the crossed
+boundary, and the affected resource. If you cannot state the concrete damage, the severity is lower
+than it feels — and if your claim depends on a fact outside this repository (how the service is
+deployed, what a third-party origin does, which grants the hosted database has), say so in
+`mitigations_checked` and mark the finding `"needs_outside_fact": "<the exact missing fact>"`.
+The reducer routes those to an unvalidated list with no severity. Not findings: checklist
+deviations, defense-in-depth gaps behind a working control, guessed deployment behaviour,
+same-principal self-impact, and a parser crash with no boundary crossing. Put those in `notes`.
+
+{attack_playbook}
+
 YOUR BATCH ({batch_id}): investigate EVERY file below. Signals show why each file was selected
 (selector id, line, matched text).
 {batch_listing}

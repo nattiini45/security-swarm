@@ -7,7 +7,7 @@ This directory holds the **MiniMax Code port** of Security Swarm.
 - Upstream layout: repository root (`swarm.py`, `prompts/`, `fixtures/`, `swarm.example.toml`)
 - Port layout: this directory (`.minimax/`)
 - License: MIT — see `LICENSE` in this directory (the same MIT text; the copyright line names the public handle)
-- Port date: 2026-10-19 … 2026-10-22
+- Port date: 2026-10-19 … 2026-10-22; synced 2026-10-29 with the upstream attack-playbook / coverage-ledger / unvalidated merge
 
 The upstream and this port are the same project by the same author
 (MIT, "Copyright (c) 2026 Caspar (PawCommit Studio)"), so this notice records **what the port
@@ -74,6 +74,16 @@ above. Every other upstream behaviour was checked feature by feature against the
 `SWARM_JSON` output, confirmed / unverified / refuted verdicts, finding chains, coverage accounting,
 the digest cache, the P0–P3 severities, the git-archive snapshot, the dirty-tree warning,
 `ask` / `status` / `approve`, and the report renderer are all present.
+
+### 6. Synced upstream changes (2026-10-29)
+
+The upstream merge of three ideas from cloudflare/security-audit-skill is carried over unchanged in
+behaviour: attack-class playbooks injected into every map prompt (`references/attack-classes/`,
+vendored MIT text with `LICENSE-cloudflare`), the coverage ledger (`coverage-ledger.json`, written by
+`map-begin`, re-runnable with `coverage <scan>`, rendered as **Not reviewed** / **Scope of this run**
+in the report), and the `unvalidated` reducer bucket (no priority, named `missing_fact`, never sent to
+a verifier). The only port-side difference: `coverage` prints a JSON manifest like every other port
+command.
 
 ## Live install
 

@@ -43,7 +43,10 @@ Run it with `python swarm.py` (see `README.md` for the CLI and `swarm.example.to
 ## Pitfalls
 
 - **Coverage is selector recall.** A file no selector matches is never investigated. Read the selector
-  table before approving a plan.
+  table before approving a plan. Then read the report's **Not reviewed** / **Scope of this run** lines
+  (`coverage-ledger.json`, `swarm.py coverage <scan>`) and pass them on: unreviewed files are not clean.
+- **Unvalidated is not a severity.** Claims that hinge on a fact outside the repo carry no priority and a
+  named `missing_fact`; report them as open questions, never fold them into the P0–P3 counts.
 - **A failed reduce falls back to raw, undeduplicated worker findings.** The report says so in the
   Summary (`REDUCER FAILED ...`): P0-P3 counts are then not authoritative and one issue repeats once per
   batch. Re-run the reduce (map is cached) instead of presenting duplicates as separate problems.

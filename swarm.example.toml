@@ -50,6 +50,8 @@ batch_size = 5            # files with signals per map worker
 concurrency = 8           # parallel agents (map, refute and verify all use this)
 max_signals_per_file = 40 # signal lines shown to a worker per file (it can read the whole file)
 data_dir = "./scans"
+playbook_max_companions = 2   # domain attack-class files injected per map batch (the core file is always in)
+playbook_max_chars = 60000    # hard cap on the injected attack-class playbook
 
 # Registered repos. `aliases` are what you may type; `ask = false` keeps a repo out of the
 # daily readiness question (the self-test fixture does this). Paths may be relative.

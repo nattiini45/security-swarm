@@ -22,6 +22,21 @@ Do this:
 4. Build CHAINS across batches: match one finding's `exposes` against another's `requires`
    (e.g. an unauthenticated disclosure of an ID + a write gated only by that ID = one higher-priority chain). Only claim a
    chain when you can name the concrete steps.
+5. Route every finding whose exploitability depends on a fact OUTSIDE the repository (hosted
+   service configuration, deployed memory/network limits, third-party origin behaviour, database
+   grants on the hosted instance, what an operator configured) into `unvalidated` instead of the
+   findings list. Such a claim gets NO priority and must carry the single `missing_fact` that
+   would settle it. This is not a demotion to P3: it is a different kind of statement — "the source
+   path is real, whether it is reachable is unknown" — and the report presents it separately.
+
+Severity discipline:
+- Severity comes from demonstrated impact, never from the pattern that was matched. If you cannot
+  name the concrete damage, use the lower tier — or `unvalidated` when the unknown is the reachability itself.
+- A defense-in-depth gap behind a working control is a hardening note, not a finding: `dismissed`
+  with reason "hardening".
+- A claim whose text you had to soften to keep it ("could", "may", "in some configurations") goes to
+  `unvalidated` with the fact that would make it definite.
+- Do not invent a chain to raise priority. Two findings touching the same file are not a chain.
 
 Reply with ONLY this block, nothing before or after it:
 <<<SWARM_JSON
@@ -36,6 +51,11 @@ Reply with ONLY this block, nothing before or after it:
   "chains": [
     {{"id": "C1", "priority": "P0|P1|P2|P3", "title": "short", "steps": ["F2", "F5"],
       "impact": "what the combination achieves"}}
+  ],
+  "unvalidated": [
+    {{"title": "short", "reason": "why the source path alone cannot establish reachability",
+      "missing_fact": "the ONE fact outside the repository that would settle it",
+      "locations": [{{"path": "...", "lines": "..."}}]}}
   ],
   "dismissed": [{{"title": "...", "reason": "...", "source_batches": ["B001"]}}]
 }}
