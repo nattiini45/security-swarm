@@ -71,6 +71,7 @@ swarm.py plan <repo> [--ref REF] [--feedback TEXT] [--scan ID]   # new plan / re
 swarm.py approve <scan>
 swarm.py run <scan> [--concurrency N] [--batch-size N] [--max-batches N] [--force]
 swarm.py verify <scan>                                           # re-run only the per-claim verifiers
+swarm.py coverage <scan>                                         # coverage ledger: unreviewed / scoped-out files
 swarm.py status [<scan>]
 swarm.py ask                                                     # daily readiness text
 swarm.py repos
@@ -90,8 +91,9 @@ Delete a single cache file to force exactly that unit to run again.
 ## Output
 
 `scans/<scan-id>/report.md` — coverage line, P0–P3 counts, attack chains, per-finding verification
-verdicts with the quoted evidence, and a **Refuted** section listing dropped claims with the reason.
-`findings.json` carries the same data structurally; `threat-model.md` is the approved plan.
+verdicts with the quoted evidence, an **Unvalidated** section (leads that hinge on an outside fact),
+and a **Refuted** section listing dropped claims with the reason. `coverage-ledger.json` lists what
+was not reviewed. `findings.json` carries the same data structurally; `threat-model.md` is the approved plan.
 
 ## Adapting to another harness
 
@@ -123,13 +125,27 @@ preamble (see below).
 
 ## Configuration
 
-See `swarm.example.toml`. `[models.*]` pins five roles; `[scan]` sets batch size, concurrency and the
-data directory; `[repos.*]` registers repos with aliases and a one-line note for the planner.
+See `swarm.example.toml`. `[models.*]` pins five roles; `[scan]` sets batch size, concurrency, the
+data directory and the attack-playbook caps; `[repos.*]` registers repos with aliases and a one-line note for the planner.
 
 ## Design notes
 
-- **Coverage is selector recall.** A file no selector matches is never investigated. Read the selector
-  table; flag selectors that return 0 matches or a regex error before approving.
+- **Coverage is selector recall — and the report says so.** A file no selector matches is never
+  investigated. Every run writes `coverage-ledger.json` (in-scope files, selector-matched files,
+  files batched by this run, and every in-scope file **no** selector matched, grouped by directory),
+  and the report prints a **Not reviewed** line plus a **Scope of this run** line for partial runs
+  (`--max-batches`). Unreviewed is not clean. Re-run the ledger any time with `swarm.py coverage <scan>`.
+- **Attack-class playbooks.** Each map batch gets the core attack-class checklist plus up to
+  `scan.playbook_max_companions` domain checklists (AI/LLM, web auth, client-side, supply chain, cloud,
+  data isolation, resource exhaustion, protocols, desktop/mobile IPC, memory safety), picked
+  deterministically from the batch's own paths. Selectors say *where* to look; the playbook says *what
+  to look for*. Vendored from [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill)
+  (MIT) — see `references/attack-classes/README.md` and `LICENSE-cloudflare`.
+- **Severity requires demonstrated impact.** Mappers and the reducer must name the concrete damage.
+  A claim whose exploitability turns on a fact outside the repository (hosted DB grants, deployed
+  limits, third-party behaviour) goes to an **Unvalidated** section with no priority and a named
+  `missing_fact`; it is excluded from the P0–P3 counts and from verification, because a source-only
+  verifier could only guess.
 - **The defensive preamble is load-bearing.** Every prompt opens with an authorized, defensive-review
   framing and forbids exploit code. Provider safety filters refuse attack-framed planning prompts; keep
   the framing in any prompt edit.

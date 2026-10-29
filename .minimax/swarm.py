@@ -34,6 +34,7 @@ Usage:
   swarm.py verify-begin <scan>
   swarm.py verify-ingest <scan>
   swarm.py report <scan>
+  swarm.py coverage <scan>                      # coverage ledger: unreviewed / scoped-out files
   swarm.py status [<scan>]
   swarm.py ask
 """
@@ -66,6 +67,33 @@ def _resolve(p: str) -> Path:
 
 
 DATA = _resolve(CFG["scan"]["data_dir"])
+CLASSES_DIR = HERE / "references" / "attack-classes"
+PLAYBOOK_MAX_CHARS = int(CFG["scan"].get("playbook_max_chars", 60000))
+PLAYBOOK_MAX_COMPANIONS = int(CFG["scan"].get("playbook_max_companions", 2))
+# path/substring hints -> domain companion file (curated checklists vendored from
+# cloudflare/security-audit-skill, MIT; see references/attack-classes/README.md)
+COMPANION_HINTS = [
+    ("AI-AND-LLM.md", ("src/lib/ai/", "/ai/agent/", "/llm/", "/prompts/", "openai", "anthropic",
+                       "embedding", "tool_call", "mcp")),
+    ("WEB-PROTOCOL-AND-AUTH.md", ("auth", "session", "jwt", "oauth", "login", "signin", "signup",
+                                  "token", "csrf", "cookie", "password", "middleware")),
+    ("CLIENT-SIDE.md", ("/components/", ".tsx", "webview", "postmessage", "innerhtml", "render",
+                        "public/", "/app/(public)/")),
+    ("SUPPLY-CHAIN-AND-RELEASE.md", ("package.json", "/.github/", "/workflows/", "dockerfile",
+                                     "scripts/", "makefile", ".env")),
+    ("CLOUD-AND-DEPLOYMENT.md", ("docker-compose", "k8s", "helm", "terraform", "vercel.json",
+                                 "/infra/", "nginx", "caddy")),
+    ("DATA-ISOLATION-AND-LIFECYCLE.md", ("migrations/", "/supabase/", "queries/", "rls", "tenant",
+                                         "seed.sql", "backup", "export", "retention")),
+    ("RESOURCE-EXHAUSTION-AND-AVAILABILITY.md", ("import", "upload", "xlsx", "csv", "buffer",
+                                                 "rate-limit", "queue", "worker", "archive", "unzip")),
+    ("PROTOCOLS-RPC-AND-MESSAGING.md", ("rpc", "grpc", "websocket", "/ws", "webhook", "broker",
+                                        "subscriber", "stream")),
+    ("DESKTOP-MOBILE-AND-LOCAL-IPC.md", ("android", "ios/", "electron", "deep-link", "/ipc",
+                                         "binder", "xpc", "daemon")),
+    ("MEMORY-SAFETY-AND-BINARY.md", (".c", ".cc", ".cpp", ".h", ".rs", "unsafe", "kernel", "ffi",
+                                     "jni", "wasm")),
+]
 BUILTIN_EXCLUDES = [
     "**/node_modules/**", "**/.git/**", "**/dist/**", "**/build/**", "**/.next/**", "**/out/**",
     "**/coverage/**", "**/vendor/**", "**/.gradle/**", "**/*.min.js", "**/*.map", "**/*.lock",
@@ -463,6 +491,117 @@ def all_excludes(plan: dict) -> list[str]:
     return BUILTIN_EXCLUDES + list(plan.get("exclude_globs") or [])
 
 
+# ---------------------------------------------------------------- attack playbook / coverage
+
+def _read_class(name: str) -> str:
+    p = CLASSES_DIR / name
+    try:
+        return p.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def attack_playbook(batch: dict) -> str:
+    """Curated hunting checklists for one batch: the core class file always, plus up to
+    PLAYBOOK_MAX_COMPANIONS domain companions chosen by path heuristics (deterministic).
+
+    Ported from cloudflare/security-audit-skill's companion selection, which picks a domain file
+    because reconnaissance found the trust boundary it describes - never because a language or a
+    dependency name merely appears. Same rule here: a hint must match the batch's own paths.
+    """
+    files = [f["file"].lower() for f in batch.get("files", [])]
+    if not files:
+        return ""
+    core = _read_class("ATTACK-CLASSES.md")
+    scored = []
+    for name, hints in COMPANION_HINTS:
+        hits = sum(1 for path in files if any(h in path for h in hints))
+        if hits:
+            scored.append((hits, name))
+    scored.sort(key=lambda t: (-t[0], t[1]))
+    chosen = [name for _, name in scored[:PLAYBOOK_MAX_COMPANIONS]]
+    parts = ["ATTACK-CLASS PLAYBOOK (curated checklists; use them to direct your reading, not as "
+             "a checklist to tick - an item only becomes a finding if you can trace the reachable "
+             "path).", "", "## Core classes", "", core]
+    used = len(core)
+    for name in chosen:
+        body = _read_class(name)
+        if not body or used + len(body) > PLAYBOOK_MAX_CHARS:
+            continue
+        parts += ["", f"## Domain companion: `{name}` (this batch touches the boundary it covers)", "",
+                  body]
+        used += len(body)
+    return "\n".join(parts)
+
+
+def coverage(d: Path, plan: dict, queued: set[str] | None = None) -> dict:
+    """Deterministic coverage ledger: in-scope files, files any selector matched, and the ones
+    NO selector matched (which therefore were never read by any worker).
+
+    The gap this records is real and was the whole point of adopting Cloudflare's ledger: on a
+    selective scan, 'no findings' must never be read as 'nothing there'.
+    """
+    snap, ex = d / "snapshot", all_excludes(plan)
+    matched: set[str] = set()
+    per_selector: dict[str, int] = {}
+    for sel in plan.get("selectors", []):
+        try:
+            fs = {s["file"] for s in run_selector(snap, sel, ex)}
+        except ValueError as e:
+            per_selector[sel.get("id", "?")] = -1
+            log(f"coverage: selector {sel.get('id')} errored: {str(e)[:80]}")
+            continue
+        per_selector[sel.get("id", "?")] = len(fs)
+        matched |= fs
+    listing = subprocess.run([rg_bin(), "--files", "--no-config"] +
+                             sum([["-g", "!" + g] for g in ex], []) + ["."],
+                             cwd=str(snap), capture_output=True, text=True,
+                             encoding="utf-8", errors="replace").stdout
+    in_scope = sorted({norm(l.strip()) for l in listing.splitlines() if l.strip()})
+    unmatched = [f for f in in_scope if f not in matched]
+    by_dir: dict[str, int] = {}
+    for f in unmatched:
+        parts = f.split("/")
+        key = "/".join(parts[:2]) if len(parts) > 1 else "(root)"
+        by_dir[key] = by_dir.get(key, 0) + 1
+    matched_in_scope = matched & set(in_scope)
+    # A scoped run (hand-built queue, --max-batches) reviews only part of what the selectors
+    # matched. That is a different hole from "no selector matched": the files are eligible but
+    # were not batched. Both must be visible, or a partial run reads as a complete one.
+    skipped_by_scope = sorted(matched_in_scope - queued) if queued else []
+    return {
+        "repo": d.name,
+        "in_scope_files": len(in_scope),
+        "matched_files": len(matched_in_scope),
+        "queued_files": len(queued) if queued else None,
+        "matched_not_queued": len(skipped_by_scope),
+        "matched_not_queued_sample": skipped_by_scope[:500],
+        "unmatched_files": len(unmatched),
+        "files_per_selector": per_selector,
+        "unmatched_by_dir": dict(sorted(by_dir.items(), key=lambda t: -t[1])[:25]),
+        "unmatched_sample": unmatched[:500],
+        "note": ("unmatched_sample = in scope, matched no selector. matched_not_queued_sample = "
+                 "selector-matched but not batched by this run's queue. Neither set was read by any "
+                 "worker: they are unreviewed, not clean."),
+    }
+
+
+def cmd_coverage(a) -> None:
+    d = scan_dir(a.scan)
+    plan = load(d / "plan.json")
+    queued = None
+    qpath = d / "queue.json"
+    if qpath.exists():
+        queued = {f["file"] for b in load(qpath).get("batches", []) for f in b.get("files", [])}
+    cov = coverage(d, plan, queued)
+    save(d / "coverage-ledger.json", cov)
+    emit({"ok": True, "scan": d.name, "in_scope_files": cov["in_scope_files"],
+          "matched_files": cov["matched_files"], "queued_files": cov["queued_files"],
+          "matched_not_queued": cov["matched_not_queued"], "unmatched_files": cov["unmatched_files"],
+          "unmatched_by_dir": dict(list(cov["unmatched_by_dir"].items())[:10]),
+          "ledger": str(d / "coverage-ledger.json")})
+
+
 def selector_stats(d: Path, plan: dict) -> dict:
     snap, ex = d / "snapshot", all_excludes(plan)
     stats, files = {}, set()
@@ -582,14 +721,29 @@ def cmd_map_begin(a) -> None:
             threat_model=plan.get("threat_model", ""),
             investigation_guidance=plan.get("investigation_guidance", ""),
             severity_criteria=plan.get("severity_criteria", ""), batch_id=b["id"],
+            attack_playbook=attack_playbook(b),
             batch_listing=batch_listing(b))
         write_task(d, f"map-{b['id']}", prompt)
         tasks.append(task_manifest(d, f"map-{b['id']}", role="mapper", batch=b["id"],
                                    files=[f["file"] for f in b["files"]]))
     n_files = sum(len(b["files"]) for b in batches)
     meta.update(status="mapping", batches=len(batches), files_queued=n_files)
+    cov = None
+    try:  # coverage ledger: what NO selector matched, i.e. what nobody will read
+        queued = {f["file"] for b in batches for f in b.get("files", [])}
+        cov = coverage(d, plan, queued)
+        save(d / "coverage-ledger.json", cov)
+        meta["coverage"] = {k: cov[k] for k in
+                            ("in_scope_files", "matched_files", "queued_files", "matched_not_queued",
+                             "unmatched_files", "unmatched_by_dir")}
+        log(f"coverage: {cov['matched_files']} of {cov['in_scope_files']} in-scope files matched a "
+            f"selector · queued {cov['queued_files']} · not-queued {cov['matched_not_queued']} · "
+            f"no-selector {cov['unmatched_files']}")
+    except Exception as e:  # noqa: BLE001 — a broken ledger must not stop the scan, only warn
+        log(f"coverage ledger failed: {str(e)[:140]}")
     save(d / "scan.json", meta)
-    emit({"scan": meta["id"], "batches": len(batches), "files": n_files, "tasks": tasks})
+    emit({"scan": meta["id"], "batches": len(batches), "files": n_files,
+          "coverage": meta.get("coverage"), "tasks": tasks})
 
 
 def cmd_map_ingest(a) -> None:
@@ -762,6 +916,7 @@ def cmd_reduce_ingest(a) -> None:
         red.setdefault("findings", [])
         red.setdefault("chains", [])
         red.setdefault("dismissed", [])
+        red.setdefault("unvalidated", [])
     except Exception as e:  # noqa: BLE001 — keep raw findings rather than lose the scan
         log(f"reduce failed: {e}; report falls back to raw findings")
         red = {"summary": f"REDUCER FAILED ({e}). Raw, undeduplicated worker findings below.",
@@ -787,6 +942,8 @@ def cmd_verify_begin(a) -> None:
     plan = load(d / "plan.json")
     red = load(d / "findings.json")
     findings, chains = red.get("findings", []), red.get("chains", [])
+    # `unvalidated` claims carry no severity by design and are never sent to a verifier: the
+    # missing fact is outside the repository, so a source-only verifier could only guess.
     by_id = {f.get("id"): f for f in findings}
     claims = [("finding", f) for f in findings] + [("chain", c) for c in chains]
     tasks = []
@@ -884,13 +1041,26 @@ def render_report(meta: dict, red: dict) -> str:
          f"({meta['uncommitted_changes_excluded']} uncommitted changes not scanned)", "",
          f"**Coverage:** {meta.get('files_queued', '?')} files investigated in {meta.get('batches', '?')} batches "
          f"(selected by {len(st.get('per_selector', {}))} selectors out of {st.get('files_in_scope', '?')} files in scope). "
-         f"Failed batches: {', '.join(meta.get('map_failed') or []) or 'none'}.", "",
-         f"**Findings:** P0 {counts['P0']} · P1 {counts['P1']} · P2 {counts['P2']} · P3 {counts['P3']} · "
-         f"chains {len(live_chains)} · dismissed {len(red.get('dismissed', []))}", "",
-         f"**Verification:** {vc['confirmed']} confirmed · {vc['unverified']} unverified · "
-         f"{vc['refuted']} refuted after reduce · {len(pre)} refuted before reduce "
-         f"(one independent agent per claim)", "",
-         "## Summary", "", red.get("summary", ""), ""]
+         f"Failed batches: {', '.join(meta.get('map_failed') or []) or 'none'}.", ""]
+    cov = meta.get("coverage") or {}
+    if cov:
+        top = list((cov.get("unmatched_by_dir") or {}).items())[:5]
+        L += [f"**Not reviewed:** {cov.get('unmatched_files', '?')} of {cov.get('in_scope_files', '?')} "
+              f"in-scope files matched no selector, so no worker read them — they are unreviewed, "
+              f"not clean. Worst directories: "
+              + ", ".join(f"`{d}` ({n})" for d, n in top) + ".", ""]
+        if cov.get("queued_files") is not None:
+            L += [f"**Scope of this run:** {cov['queued_files']} of {cov['matched_files']} "
+                  f"selector-matched files were batched"
+                  + (f" — {cov['matched_not_queued']} matched files were NOT scanned (scoped run)."
+                     if cov.get("matched_not_queued") else "."), ""]
+    L += [f"**Findings:** P0 {counts['P0']} · P1 {counts['P1']} · P2 {counts['P2']} · P3 {counts['P3']} · "
+          f"chains {len(live_chains)} · dismissed {len(red.get('dismissed', []))}"
+          + (f" · unvalidated {len(red.get('unvalidated') or [])}" if red.get("unvalidated") else ""), "",
+          f"**Verification:** {vc['confirmed']} confirmed · {vc['unverified']} unverified · "
+          f"{vc['refuted']} refuted after reduce · {len(pre)} refuted before reduce "
+          f"(one independent agent per claim)", "",
+          "## Summary", "", red.get("summary", ""), ""]
     if live_chains:
         L += ["## Attack chains", ""]
         for c in live_chains:
@@ -918,6 +1088,19 @@ def render_report(meta: dict, red: dict) -> str:
                      + (f" Evidence: {ev}" if ev else ""))
         else:
             L.append("- **verification:** not run")
+        L.append("")
+    if red.get("unvalidated"):
+        L += ["## Unvalidated (no severity assigned)", "",
+              "_Claims whose exploitability turns on a fact outside this repository (hosted service "
+              "configuration, deployed limits, third-party behaviour). They are leads, not findings: "
+              "resolve the named fact before treating any of them as real._", ""]
+        for u in red["unvalidated"]:
+            locs = ", ".join(f"`{l.get('path')}:{l.get('lines')}`" for l in u.get("locations", []))
+            L.append(f"- **{u.get('title')}**" + (f" · {locs}" if locs else ""))
+            if u.get("reason"):
+                L.append(f"  - why it is not a finding: {u['reason']}")
+            if u.get("missing_fact"):
+                L.append(f"  - missing fact: {u['missing_fact']}")
         L.append("")
     if red.get("dismissed"):
         L += ["## Dismissed by reducer", ""] + [f"- {x.get('title')}: {x.get('reason')}" for x in red["dismissed"]]
@@ -1019,6 +1202,7 @@ def main() -> None:
     x = sp.add_parser("verify-ingest"); x.add_argument("scan"); x.set_defaults(fn=cmd_verify_ingest)
     x = sp.add_parser("report"); x.add_argument("scan"); x.set_defaults(fn=cmd_report)
     x = sp.add_parser("status"); x.add_argument("scan", nargs="?"); x.set_defaults(fn=cmd_status)
+    x = sp.add_parser("coverage"); x.add_argument("scan"); x.set_defaults(fn=cmd_coverage)
     sp.add_parser("ask").set_defaults(fn=cmd_ask)
     sp.add_parser("repos").set_defaults(fn=cmd_repos)
     sp.add_parser("roles").set_defaults(fn=cmd_roles)

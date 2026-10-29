@@ -54,6 +54,7 @@ verifier yields `unverified`, never `confirmed`).
 ├── swarm.py              deterministic engine: snapshot, shard, cache, digest, rank, render
 ├── swarm.toml            repos, roles (agent + model per role), scan settings
 ├── prompts/              plan / map / refute / reduce / verify templates
+├── references/attack-classes/  vendored attack-class playbooks (Cloudflare, MIT)
 └── fixtures/teamboard/   self-test repo with five planted bugs
 ```
 
@@ -66,7 +67,7 @@ The engine never calls a model. Every stage is two commands:
 | stage | begin | ingest |
 |---|---|---|
 | plan | writes `tasks/plan.md` | parses the reply → `plan.json` + `threat-model.md` |
-| map | writes `tasks/map-<batch>.md` | caches `map/<batch>.json` |
+| map | writes `tasks/map-<batch>.md` (with its attack playbook) + `coverage-ledger.json` | caches `map/<batch>.json` |
 | refute | writes `tasks/refute-<batch>.md` | caches `refute/<batch>.json`, drops refuted findings |
 | reduce | writes `tasks/reduce.md` | writes `findings.json` |
 | verify | writes `tasks/verify-<claim>.md` | caches `verify/<claim>.json`, writes `report.md` |
@@ -93,6 +94,7 @@ swarm.py reduce-ingest <scan>
 swarm.py verify-begin <scan>
 swarm.py verify-ingest <scan>
 swarm.py report <scan>
+swarm.py coverage <scan>                     # coverage ledger: unreviewed / scoped-out files
 swarm.py status [<scan>]
 swarm.py ask
 ```
@@ -114,7 +116,7 @@ Delete a single cache file to force exactly that unit to run again.
 `swarm.toml` has three blocks:
 
 - `[scan]` — `batch_size`, `concurrency` (max parallel child agents), `max_signals_per_file`,
-  `data_dir`, `rg_path`.
+  `data_dir`, `rg_path`, `playbook_max_companions`, `playbook_max_chars`.
 - `[roles.<role>]` — the `agent` type and `model` the host spawns for that role. Every role
   currently runs on `minimax/MiniMax-M3.1-Flash`; promote a single role by changing one line.
 - `[repos.<slug>]` — `path`, `aliases`, a one-line `notes` for the planner, `ask`.
@@ -126,13 +128,28 @@ tolerates it.
 ## Output
 
 `scans/<scan-id>/report.md` — coverage line, P0–P3 counts, attack chains, per-finding verification
-verdicts with the quoted evidence, and a **Refuted** section listing dropped claims with the reason.
-`findings.json` carries the same data structurally; `threat-model.md` is the approved plan.
+verdicts with the quoted evidence, an **Unvalidated** section (leads that hinge on an outside fact),
+and a **Refuted** section listing dropped claims with the reason. `coverage-ledger.json` lists what
+was not reviewed. `findings.json` carries the same data structurally; `threat-model.md` is the approved plan.
 
 ## Design notes
 
-- **Coverage is selector recall.** A file no selector matches is never investigated. Read the selector
-  table; flag selectors that return 0 matches or a regex error before approving.
+- **Coverage is selector recall — and the report says so.** A file no selector matches is never
+  investigated. Every run writes `coverage-ledger.json` (in-scope files, selector-matched files,
+  files batched by this run, and every in-scope file **no** selector matched, grouped by directory),
+  and the report prints a **Not reviewed** line plus a **Scope of this run** line for partial runs
+  (`--max-batches`). Unreviewed is not clean. Re-run the ledger any time with `swarm.py coverage <scan>`.
+- **Attack-class playbooks.** Each map batch gets the core attack-class checklist plus up to
+  `scan.playbook_max_companions` domain checklists (AI/LLM, web auth, client-side, supply chain, cloud,
+  data isolation, resource exhaustion, protocols, desktop/mobile IPC, memory safety), picked
+  deterministically from the batch's own paths. Selectors say *where* to look; the playbook says *what
+  to look for*. Vendored from [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill)
+  (MIT) — see `references/attack-classes/README.md` and `LICENSE-cloudflare`.
+- **Severity requires demonstrated impact.** Mappers and the reducer must name the concrete damage.
+  A claim whose exploitability turns on a fact outside the repository (hosted DB grants, deployed
+  limits, third-party behaviour) goes to an **Unvalidated** section with no priority and a named
+  `missing_fact`; it is excluded from the P0–P3 counts and from verification, because a source-only
+  verifier could only guess.
 - **The defensive preamble is load-bearing.** Every prompt opens with an authorized, defensive-review
   framing and forbids exploit code. Provider safety filters refuse attack-framed planning prompts; keep
   the framing in any prompt edit.
