@@ -74,7 +74,9 @@ jobs:
         with:
           name: gitleaks-report
           path: gitleaks-report.json
-          if-no-files-found: ignore
+          # The Scan step promises a JSON report: if it is missing the scan never really ran,
+          # so fail the upload instead of silently passing with no artifact (F8).
+          if-no-files-found: error
 
   semgrep:
     name: security / semgrep
@@ -95,9 +97,24 @@ jobs:
         run: |
           # SAST on application code. Workflow-injection meta-rules are excluded
           # here (zizmor covers those) so this stays low-noise.
+          # Findings are advisory (job-level continue-on-error) but a TOOL failure is not:
+          # semgrep exits 1 for findings, >=2 for a broken install/registry/crash, so gate on that.
+          set +e
           semgrep scan --config p/default --config p/secrets \
             --error --severity ERROR --metrics off --exclude .github \
-            --exclude fixtures --exclude .minimax/fixtures .
+            --exclude fixtures --exclude .minimax/fixtures \
+            --sarif --output=semgrep.sarif .
+          rc=$?
+          set -e
+          if [ "$rc" -ge 2 ]; then echo "semgrep failed (exit $rc), not a findings exit" >&2; exit "$rc"; fi
+          exit 0
+      - name: Upload semgrep SARIF
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: semgrep-sarif
+          path: semgrep.sarif
+          if-no-files-found: error
 
   workflow-lint:
     name: security / workflow-lint
@@ -124,8 +141,20 @@ jobs:
         # actionlint's own syntax/expression checks (which catch real workflow
         # bugs) stay on.
         run: actionlint -color -shellcheck=
+      - name: zizmor sanity
+        run: zizmor --version
       - name: zizmor (workflow security audit, advisory)
+        # Findings are advisory (continue-on-error) but a broken install must still show red:
+        # no `|| true`, so a crash/bad flag leaves a failing step instead of looking like a clean audit.
+        # zizmor has no --output flag: redirect stdout to the SARIF file.
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: zizmor --persona=regular .github/workflows || true
+        run: zizmor --persona=regular --format=sarif .github/workflows > zizmor.sarif
+      - name: Upload zizmor SARIF
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: zizmor-sarif
+          path: zizmor.sarif
+          if-no-files-found: error
