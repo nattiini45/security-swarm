@@ -1,0 +1,131 @@
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Security sweep: secrets (gitleaks), SAST (semgrep, advisory) and workflow
+# linting (actionlint + zizmor). Everything runs from pinned, checksum-verified
+# binaries or pinned pip packages; no GitHub Advanced Security needed.
+#
+# The job `name:` values are the required status-check contexts in the main
+# branch ruleset ('security / gitleaks', 'security / workflow-lint'). Do not
+# rename them without editing the ruleset first, or every PR is blocked.
+name: Security
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+  schedule:
+    - cron: '0 6 * * 1'
+permissions:
+  contents: read
+
+env:
+  GITLEAKS_VERSION: '8.30.1'
+  GITLEAKS_SHA256: '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
+  ACTIONLINT_VERSION: '1.7.12'
+  ACTIONLINT_SHA256: '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8'
+  ZIZMOR_VERSION: '1.25.2'
+  ZIZMOR_SHA256: 'aa1facd105f0d83fe5c55b1adcd9d7417de5d83aa27471f91dc0b66cf3803577'
+  SEMGREP_VERSION: '1.166.0'
+
+jobs:
+  gitleaks:
+    name: security / gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install gitleaks
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o gitleaks.tar.gz
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo install gitleaks /usr/local/bin/gitleaks
+          rm -f gitleaks gitleaks.tar.gz
+      - name: Scan
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # On PRs scan only the new commits (fast, no false positives from
+          # history). On push/schedule scan the entire history.
+          #
+          # -v prints every finding (RuleID / File / Line / Commit) to the log so
+          # a failure is actionable; --redact keeps the secret value masked. A
+          # JSON report is written and uploaded as an artifact for full detail.
+          if [ "$EVENT" = "pull_request" ] && [ -n "$BASE" ]; then
+            echo "Scanning PR range $BASE..$HEAD"
+            gitleaks detect --source . --config .gitleaks.toml --redact -v --no-banner \
+              --log-opts="$BASE..$HEAD" \
+              --report-format json --report-path gitleaks-report.json
+          else
+            echo "Scanning full history"
+            gitleaks detect --source . --config .gitleaks.toml --redact -v --no-banner \
+              --report-format json --report-path gitleaks-report.json
+          fi
+      - name: Upload gitleaks report
+        # Publish on success or gitleaks failure, but not on cancellation.
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.json
+          if-no-files-found: ignore
+
+  semgrep:
+    name: security / semgrep
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Advisory: findings are logged but never fail the run.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Install semgrep
+        run: pip install "semgrep==${SEMGREP_VERSION}"
+      - name: Scan
+        run: |
+          # SAST on application code. Workflow-injection meta-rules are excluded
+          # here (zizmor covers those) so this stays low-noise.
+          semgrep scan --config p/default --config p/secrets \
+            --error --severity ERROR --metrics off --exclude .github \
+            --exclude fixtures --exclude .minimax/fixtures .
+
+  workflow-lint:
+    name: security / workflow-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install actionlint and zizmor
+        run: |
+          curl -sSfL "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" -o actionlint.tar.gz
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+          sudo install actionlint /usr/local/bin/actionlint
+          curl -sSfL "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz" -o zizmor.tar.gz
+          echo "${ZIZMOR_SHA256}  zizmor.tar.gz" | sha256sum -c -
+          tar -xzf zizmor.tar.gz zizmor
+          sudo install zizmor /usr/local/bin/zizmor
+          rm -f actionlint actionlint.tar.gz zizmor zizmor.tar.gz
+      - name: actionlint
+        # -shellcheck= disables the shellcheck integration: SC2086-style word
+        # splitting in run-blocks is often intentional and too noisy to gate on.
+        # actionlint's own syntax/expression checks (which catch real workflow
+        # bugs) stay on.
+        run: actionlint -color -shellcheck=
+      - name: zizmor (workflow security audit, advisory)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: zizmor --persona=regular .github/workflows || true

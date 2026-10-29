@@ -1,0 +1,39 @@
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Conventional-Commits PR title check (no LLM, no cost, no third-party code
+# beyond the pinned first-party github-script action). Keeps the `edited`
+# trigger so fixing a non-conventional title re-runs this required check
+# immediately.
+#
+# The job `name:` is the required status-check context 'title / pr-title' in
+# the main branch ruleset. Do not rename it without editing the ruleset first.
+name: PR Title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  title:
+    name: title / pr-title
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          TYPES: 'feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert'
+        with:
+          script: |
+            const types = process.env.TYPES.split(',').map(s => s.trim()).filter(Boolean);
+            const title = context.payload.pull_request.title || '';
+            const re = new RegExp(`^(${types.join('|')})(\\([a-z0-9 ./_-]+\\))?!?: .+`, 'i');
+            if (!re.test(title)) {
+              core.setFailed(`PR title is not Conventional Commits: "${title}". Expected "<type>(optional scope): summary". Allowed types: ${types.join(', ')}`);
+            } else {
+              core.info(`PR title OK: ${title}`);
+            }
