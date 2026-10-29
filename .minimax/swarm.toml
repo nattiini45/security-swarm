@@ -12,6 +12,8 @@ data_dir = "~/.minimax/security-swarm"   # scans, caches and tools live here
 rg_path = ""              # explicit ripgrep path; empty = bundled, then PATH
 playbook_max_companions = 2   # domain attack-class files injected per map batch (the core file is always in)
 playbook_max_chars = 60000    # hard cap on the injected attack-class playbook
+deps_scan = true              # run OSV-Scanner over lockfiles/manifests (sends package names+versions to osv.dev)
+osv_scanner_path = ""         # explicit osv-scanner binary; empty = PATH
 
 # One child agent per role. `agent` is a Mavis agent type (explore = read-only).
 # `model` is a source-qualified model key (<provider>/<model>).

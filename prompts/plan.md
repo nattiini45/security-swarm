@@ -30,6 +30,16 @@ Steps:
    security-critical areas such as auth modules, middleware, RLS/migration SQL, manifests).
 4. List exclude globs for generated/vendored/irrelevant code (built-in excludes already cover
    node_modules, dist, build, .git, lockfiles, minified files and binaries).
+5. Map the review onto the security top lists below. Pick every list that applies to this codebase
+   (`top10` always; `api` if it serves an HTTP/RPC API; `llm` if it calls models or runs agents;
+   `masvs` if it ships a mobile app) and tag every selector with the catalog ids it looks for.
+   The report lists each category of the chosen lists as finding / checked / NOT CHECKED, and a
+   category no selector is tagged with shows up as not checked — so add a selector rather than leave
+   a relevant category untagged. Dependency CVEs (A03) are covered by a separate scanner; still tag
+   selectors for manifests, CI workflows and build scripts.
+
+SECURITY TOP LISTS
+{standards_catalog}
 
 Pattern rules: Rust regex syntax as used by ripgrep (no lookaround, no backreferences). Escape
 literal parentheses/dots. Globs use ripgrep -g syntax (e.g. "*.ts", "src/server/**").
@@ -46,8 +56,9 @@ Reply with ONLY this block, nothing before or after it:
     {{"id": "kebab-id", "category": "input|authz|sink|secrets|config|other",
       "description": "what this catches and why it matters",
       "pattern": "ripgrep regex or null", "case_insensitive": false,
-      "globs": ["*.ts", "*.tsx"]}}
+      "globs": ["*.ts", "*.tsx"], "owasp": ["A01:2025", "API1:2023"]}}
   ],
+  "standards": ["top10", "api"],
   "exclude_globs": ["**/generated/**"]
 }}
 SWARM_JSON>>>

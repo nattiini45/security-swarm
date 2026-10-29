@@ -38,23 +38,30 @@ Severity discipline:
   `unvalidated` with the fact that would make it definite.
 - Do not invent a chain to raise priority. Two findings touching the same file are not a chain.
 
+Tag every finding, chain and unvalidated lead with `owasp`: the ids from the catalog below it falls
+under (usually one or two, across lists — e.g. an IDOR in an API is ["A01:2025", "API1:2023"]). Use
+only ids that exist in the catalog; do not tag to make the coverage look fuller.
+
+SECURITY TOP LISTS
+{standards_catalog}
+
 Reply with ONLY this block, nothing before or after it:
 <<<SWARM_JSON
 {{
   "summary": "3-6 sentences for the owner: overall posture, the most important issues",
   "findings": [
-    {{"id": "F1", "priority": "P0|P1|P2|P3", "title": "short", "category": "...", "cwe": "...",
+    {{"id": "F1", "priority": "P0|P1|P2|P3", "title": "short", "category": "...", "cwe": "...", "owasp": ["A01:2025"],
       "confidence": "high|medium|low", "locations": [{{"path": "...", "lines": "..."}}],
       "description": "what is wrong", "path": "untrusted input -> ... -> sensitive operation",
       "impact": "...", "remediation": "...", "source_batches": ["B003"]}}
   ],
   "chains": [
     {{"id": "C1", "priority": "P0|P1|P2|P3", "title": "short", "steps": ["F2", "F5"],
-      "impact": "what the combination achieves"}}
+      "impact": "what the combination achieves", "owasp": ["A01:2025"]}}
   ],
   "unvalidated": [
     {{"title": "short", "reason": "why the source path alone cannot establish reachability",
-      "missing_fact": "the ONE fact outside the repository that would settle it",
+      "missing_fact": "the ONE fact outside the repository that would settle it", "owasp": ["A02:2025"],
       "locations": [{{"path": "...", "lines": "..."}}]}}
   ],
   "dismissed": [{{"title": "...", "reason": "...", "source_batches": ["B001"]}}]

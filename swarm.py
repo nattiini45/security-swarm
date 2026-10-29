@@ -17,6 +17,7 @@ Usage:
   swarm.py approve <scan>
   swarm.py run <scan> [--concurrency N] [--batch-size N] [--max-batches N] [--force]
   swarm.py verify <scan>                               # re-run only the per-claim verifiers
+  swarm.py deps <scan>                                 # dependency scan (OSV-Scanner) only
   swarm.py coverage <scan>                             # coverage ledger (unreviewed / scoped-out files)
   swarm.py status [<scan>]
   swarm.py ask                                         # text of the daily readiness question
@@ -67,6 +68,9 @@ COMPANION_HINTS = [
                                         "subscriber", "stream")),
     ("DESKTOP-MOBILE-AND-LOCAL-IPC.md", ("android", "ios/", "electron", "deep-link", "/ipc",
                                          "binder", "xpc", "daemon")),
+    ("checklists/LOGGING-ALERTING-AND-ERROR-HANDLING.md", ("log", "audit", "monitor", "alert",
+                                                            "telemetry", "sentry", "error", "exception",
+                                                            "handler")),
     ("MEMORY-SAFETY-AND-BINARY.md", (".c", ".cc", ".cpp", ".h", ".rs", "unsafe", "kernel", "ffi",
                                      "jni", "wasm")),
 ]
@@ -239,7 +243,7 @@ def cmd_plan(a) -> None:
               f"PREVIOUS PLAN:\n{prev}")
     prompt = (HERE / "prompts" / "plan.md").read_text(encoding="utf-8").format(
         repo=rid, commit=meta["commit"], snapshot=d / "snapshot", notes=r.get("notes", ""),
-        feedback_block=fb)
+        feedback_block=fb, standards_catalog=standards_catalog())
     rnd = meta.get("plan_rounds", 0) + 1
     log(f"planner ({CFG['models']['planner']['model']}, {CFG['models']['planner']['reasoning']}) round {rnd}")
     plan = run_agent("planner", prompt, d / "snapshot", d / "logs" / f"plan-{rnd}.log")
@@ -296,10 +300,227 @@ def all_excludes(plan: dict) -> list[str]:
     return BUILTIN_EXCLUDES + list(plan.get("exclude_globs") or [])
 
 
+# ---------------------------------------------------------------- standards (OWASP lists)
+
+STANDARDS_FILE = HERE / "references" / "standards" / "standards.json"
+
+
+def load_standards() -> list[dict]:
+    try:
+        return json.loads(STANDARDS_FILE.read_text(encoding="utf-8")).get("lists", [])
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def standards_catalog() -> str:
+    """Compact catalog of the security top lists, injected into the plan and reduce prompts."""
+    out = []
+    for lst in load_standards():
+        cats = "; ".join(f"{cid} {name}" for cid, name in lst["categories"])
+        when = "always applies" if lst.get("always") else f"applies when {lst.get('applies_when', '')}"
+        out.append(f"- `{lst['key']}` — {lst['name']} ({when}): {cats}")
+    return "\n".join(out)
+
+
+def _std_index() -> dict[str, tuple[str, str]]:
+    """Canonical id -> (list key, category name); also maps short forms like A01 / API1 / LLM01."""
+    idx: dict[str, tuple[str, str]] = {}
+    for lst in load_standards():
+        for cid, name in lst["categories"]:
+            idx[cid.upper()] = (lst["key"], name)
+            idx[cid.split(":")[0].upper()] = (lst["key"], name)
+    return idx
+
+
+def norm_std_ids(ids) -> list[str]:
+    """Normalise model-supplied ids ("a01", "A01:2021", "API1") to catalog ids; drop unknown ones."""
+    if isinstance(ids, str):
+        ids = [ids]
+    canon = {cid.split(":")[0].upper(): cid for lst in load_standards() for cid, _ in lst["categories"]}
+    out = []
+    for raw in ids or []:
+        key = str(raw).strip().upper().split(":")[0].split(" ")[0]
+        if key in canon and canon[key] not in out:
+            out.append(canon[key])
+    return out
+
+
+def queued_selectors(batches: list[dict]) -> list[str]:
+    return sorted({s["selector"] for b in batches for f in b.get("files", []) for s in f.get("signals", [])})
+
+
+def standards_matrix(meta: dict, plan: dict, red: dict) -> list[str]:
+    """One row per category of every applicable list: finding / lead only / checked / NOT checked.
+
+    'checked' means a selector the planner tagged with that category matched files this run actually
+    batched. A category nobody looked for is reported as not checked — silence is not a clean bill.
+    """
+    lists = load_standards()
+    if not lists:
+        return []
+    live = [f for f in red.get("findings", []) if _verdict(f) != "refuted"]
+    live += [c for c in red.get("chains", []) if _verdict(c) != "refuted"]
+    hits: dict[str, list[str]] = {}
+    for f in live:
+        for cid in norm_std_ids(f.get("owasp")):
+            hits.setdefault(cid, []).append(str(f.get("id", "?")))
+    leads: dict[str, int] = {}
+    for u in red.get("unvalidated") or []:
+        for cid in norm_std_ids(u.get("owasp")):
+            leads[cid] = leads.get(cid, 0) + 1
+    queued = set(meta.get("selectors_queued") or [])
+    checked: dict[str, list[str]] = {}
+    for sel in plan.get("selectors", []):
+        if sel.get("id") in queued:
+            for cid in norm_std_ids(sel.get("owasp")):
+                checked.setdefault(cid, []).append(sel["id"])
+    deps = meta.get("deps") or {}
+    wanted = {k for k in (plan.get("standards") or []) if isinstance(k, str)}
+    used = {cid for cid in list(hits) + list(leads) + list(checked)}
+    L = ["## Security top lists", "",
+         "_Each category of the lists that apply to this codebase. **not checked** means no selector "
+         "looked for it in this run — it is unreviewed, not clean._", ""]
+    for lst in lists:
+        ids = [cid for cid, _ in lst["categories"]]
+        if not (lst.get("always") or lst["key"] in wanted or any(i in used for i in ids)):
+            continue
+        L += [f"**{lst['name']}**", "", "| category | status |", "|---|---|"]
+        for cid, name in lst["categories"]:
+            if cid in hits:
+                st = "finding: " + ", ".join(hits[cid])
+            elif cid in leads:
+                st = f"lead only ({leads[cid]} unvalidated)"
+            elif cid in checked:
+                st = "checked, nothing found (" + ", ".join(f"`{s}`" for s in checked[cid][:4]) + ")"
+            else:
+                st = "**not checked**"
+            if cid == "A03:2025" and deps.get("ran"):
+                n = deps.get("vulnerable_packages", 0)
+                st = (f"dependency scan: {n} vulnerable packages" if st == "**not checked**"
+                      else st + f" · dependency scan: {n} vulnerable packages")
+                if cid not in checked and cid not in hits:
+                    st += " (CI/build pipeline not reviewed)"
+            L.append(f"| {cid} {name} | {st} |")
+        L.append("")
+    return L
+
+
+# ---------------------------------------------------------------- dependency scan (OSV-Scanner)
+
+OSV_SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MODERATE": 2, "MEDIUM": 2, "LOW": 3}
+
+
+def osv_bin() -> str | None:
+    p = (CFG["scan"].get("osv_scanner_path") or "").strip()
+    if p:
+        return p
+    return shutil.which("osv-scanner")
+
+
+def _osv_band(score) -> str:
+    try:
+        s = float(score)
+    except (TypeError, ValueError):
+        return "UNKNOWN"
+    return "CRITICAL" if s >= 9 else "HIGH" if s >= 7 else "MEDIUM" if s >= 4 else "LOW" if s > 0 else "UNKNOWN"
+
+
+def dependency_scan(d: Path) -> dict:
+    """Known-vulnerable dependencies in the snapshot's lockfiles/manifests via OSV-Scanner v2.
+
+    Deterministic, no model call. Package names and versions are sent to the osv.dev API. Missing
+    scanner or a disabled scan is recorded, never silently treated as 'no vulnerable packages'.
+    """
+    if not CFG["scan"].get("deps_scan", True):
+        return {"ran": False, "reason": "disabled (scan.deps_scan = false)"}
+    exe = osv_bin()
+    if not exe:
+        return {"ran": False, "reason": "osv-scanner not found (install it or set scan.osv_scanner_path)"}
+    try:
+        proc = subprocess.run([exe, "scan", "source", "-r", "--format", "json", "."], cwd=str(d / "snapshot"),
+                              capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              timeout=int(CFG["scan"].get("deps_timeout_s", 600)))
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"ran": False, "reason": f"osv-scanner failed to run: {str(e)[:200]}"}
+    if proc.returncode == 128:
+        return {"ran": True, "packages_scanned": 0, "vulnerable_packages": 0, "vulns": [],
+                "note": "no lockfiles or manifests OSV-Scanner understands"}
+    if proc.returncode not in (0, 1):
+        return {"ran": False, "reason": f"osv-scanner exit {proc.returncode}: {proc.stderr.strip()[-300:]}"}
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return {"ran": False, "reason": "osv-scanner output was not JSON"}
+    snap = str((d / "snapshot").resolve()).replace("\\", "/").lower()
+    vulns = []
+    for res in data.get("results") or []:
+        src = str((res.get("source") or {}).get("path", "")).replace("\\", "/")
+        if src.lower().startswith(snap):
+            src = src[len(snap):].lstrip("/")
+        for p in res.get("packages") or []:
+            pkg = p.get("package") or {}
+            groups = p.get("groups") or [{"ids": [v.get("id")]} for v in p.get("vulnerabilities") or []]
+            by_id = {v.get("id"): v for v in p.get("vulnerabilities") or []}
+            for g in groups:
+                ids = [i for i in g.get("ids") or [] if i]
+                aliases = sorted({a for i in ids for a in (by_id.get(i) or {}).get("aliases") or []
+                                  if str(a).startswith("CVE-")})
+                fixed = sorted({ev["fixed"] for i in ids for aff in (by_id.get(i) or {}).get("affected") or []
+                                if (aff.get("package") or {}).get("name") == pkg.get("name")
+                                for rng in aff.get("ranges") or [] for ev in rng.get("events") or []
+                                if ev.get("fixed")})
+                summary = next(((by_id.get(i) or {}).get("summary") for i in ids
+                                if (by_id.get(i) or {}).get("summary")), "")
+                vulns.append({"package": pkg.get("name"), "version": pkg.get("version"),
+                              "ecosystem": pkg.get("ecosystem"), "source": src, "ids": ids,
+                              "cves": aliases, "cvss": g.get("max_severity") or "",
+                              "severity": _osv_band(g.get("max_severity")),
+                              "fixed": fixed[:3], "summary": str(summary)[:160]})
+    vulns.sort(key=lambda v: (OSV_SEV_ORDER.get(v["severity"], 4), v["package"] or ""))
+    n_pkgs = sum(len(r.get("packages") or []) for r in data.get("results") or [])
+    return {"ran": True, "vulnerable_packages": n_pkgs, "advisories": len(vulns), "vulns": vulns}
+
+
+def run_deps(d: Path, meta: dict) -> dict:
+    deps = dependency_scan(d)
+    save(d / "deps.json", deps)
+    meta["deps"] = {k: deps.get(k) for k in ("ran", "reason", "vulnerable_packages", "advisories", "note")
+                    if deps.get(k) is not None}
+    log("dependency scan: " + (f"{deps.get('vulnerable_packages', 0)} vulnerable packages, "
+                               f"{deps.get('advisories', 0)} advisories" if deps.get("ran")
+                               else f"not run ({deps.get('reason')})"))
+    return deps
+
+
+def deps_section(d: Path | None, meta: dict) -> list[str]:
+    info = meta.get("deps")
+    if not info:
+        return []
+    L = ["## Dependency vulnerabilities (OSV-Scanner)", ""]
+    if not info.get("ran"):
+        return L + [f"_Not run: {info.get('reason')}. Known-vulnerable dependencies were NOT checked._", ""]
+    deps = load(d / "deps.json") if d and (d / "deps.json").exists() else {"vulns": []}
+    vulns = deps.get("vulns") or []
+    if not vulns:
+        return L + [f"No known-vulnerable dependencies found{' (' + info['note'] + ')' if info.get('note') else ''}.", ""]
+    L += [f"{info.get('vulnerable_packages', 0)} packages with {len(vulns)} advisories. Not counted in "
+          "P0–P3: these are known CVEs in third-party code; whether the vulnerable function is reachable "
+          "from this app was not checked.", "",
+          "| severity | package | version | fixed in | advisories | lockfile |", "|---|---|---|---|---|---|"]
+    cap = int(CFG["scan"].get("deps_max_rows", 60))
+    for v in vulns[:cap]:
+        adv = ", ".join((v.get("cves") or [])[:2] or v.get("ids", [])[:2])
+        L.append(f"| {v['severity']} {v.get('cvss') or ''} | {v['package']} | {v['version']} | "
+                 f"{', '.join(v.get('fixed') or []) or '—'} | {adv} | `{v.get('source', '')}` |")
+    if len(vulns) > cap:
+        L.append(f"| … | {len(vulns) - cap} more in `deps.json` | | | | |")
+    return L + [""]
+
+
 # ---------------------------------------------------------------- attack playbook / coverage
 
 def _read_class(name: str) -> str:
-    p = CLASSES_DIR / name
+    p = (HERE / "references" / name) if "/" in name else (CLASSES_DIR / name)
     try:
         return p.read_text(encoding="utf-8").strip()
     except OSError:
@@ -389,6 +610,23 @@ def coverage(d: Path, plan: dict, queued: set[str] | None = None) -> dict:
                  "selector-matched but not batched by this run's queue. Neither set was read by any "
                  "worker: they are unreviewed, not clean."),
     }
+
+
+def _plan_of(d: Path) -> dict:
+    p = d / "plan.json"
+    return load(p) if p.exists() else {}
+
+
+def cmd_deps(a) -> None:
+    d = scan_dir(a.scan)
+    meta = load(d / "scan.json")
+    deps = run_deps(d, meta)
+    save(d / "scan.json", meta)
+    if (d / "findings.json").exists():
+        (d / "report.md").write_text(render_report(meta, load(d / "findings.json"), d, _plan_of(d)),
+                                     encoding="utf-8")
+    print(json.dumps({k: v for k, v in deps.items() if k != "vulns"}, indent=2))
+    print(f"\ndeps: {d / 'deps.json'}")
 
 
 def cmd_coverage(a) -> None:
@@ -724,7 +962,7 @@ def cmd_verify(a) -> None:
     red = load(d / "findings.json")
     red = verify_claims(d, meta, plan, red)
     save(d / "findings.json", red)
-    (d / "report.md").write_text(render_report(meta, red), encoding="utf-8")
+    (d / "report.md").write_text(render_report(meta, red, d, _plan_of(d)), encoding="utf-8")
     save(d / "scan.json", meta)
     print(f"\nREPORT {d / 'report.md'}")
 
@@ -746,7 +984,9 @@ def cmd_run(a) -> None:
     for stale in (d / "map").glob("*.failed.json"):  # failed batches get retried on re-run
         stale.unlink()
     n_files = sum(len(b["files"]) for b in batches)
-    meta.update(status="mapping", batches=len(batches), files_queued=n_files)
+    meta.update(status="mapping", batches=len(batches), files_queued=n_files,
+                selectors_queued=queued_selectors(batches))
+    run_deps(d, meta)
     cov = None
     try:  # coverage ledger: what NO selector matched, i.e. what nobody will read
         queued = {f["file"] for b in batches for f in b.get("files", [])}
@@ -784,7 +1024,7 @@ def cmd_run(a) -> None:
     save(d / "scan.json", meta)
     red = verify_claims(d, meta, plan, red)
     save(d / "findings.json", red)
-    (d / "report.md").write_text(render_report(meta, red), encoding="utf-8")
+    (d / "report.md").write_text(render_report(meta, red, d, _plan_of(d)), encoding="utf-8")
     meta.update(status="done", finished=dt.datetime.now().isoformat(timespec="seconds"))
     save(d / "scan.json", meta)
     print(f"\nREPORT {d / 'report.md'}")
@@ -798,7 +1038,8 @@ def reduce_(d: Path, meta: dict, plan: dict, results: list, findings: list) -> d
             repo=meta["repo"], commit=meta["commit"], snapshot=d / "snapshot",
             threat_model=plan.get("threat_model", ""), severity_criteria=plan.get("severity_criteria", ""),
             n_findings=len(findings), n_batches=len([r for r in results if r.get("findings")]),
-            findings_json=json.dumps(findings, indent=1, ensure_ascii=False))
+            findings_json=json.dumps(findings, indent=1, ensure_ascii=False),
+            standards_catalog=standards_catalog())
         log(f"reduce ({CFG['models']['reducer']['model']}, {CFG['models']['reducer']['reasoning']})")
         try:
             red = run_agent("reducer", prompt, d / "snapshot", d / "logs" / "reduce.log")
@@ -815,7 +1056,7 @@ def _verdict(obj: dict) -> str:
     return str((obj.get("verification") or {}).get("verdict", "")).lower()
 
 
-def render_report(meta: dict, red: dict) -> str:
+def render_report(meta: dict, red: dict, d: Path | None = None, plan: dict | None = None) -> str:
     order = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
     fs = sorted(red.get("findings", []), key=lambda f: order.get(f.get("priority"), 9))
     live = [f for f in fs if _verdict(f) != "refuted"]
@@ -862,6 +1103,7 @@ def render_report(meta: dict, red: dict) -> str:
             if (c.get("verification") or {}).get("reason"):
                 L.append(f"  - verifier: {c['verification'].get('reason')}")
         L.append("")
+    L += standards_matrix(meta, plan or {}, red)
     L += ["## Findings", ""]
     if not live:
         L += ["_No findings survived verification._", ""]
@@ -893,6 +1135,7 @@ def render_report(meta: dict, red: dict) -> str:
             if u.get("missing_fact"):
                 L.append(f"  - missing fact: {u['missing_fact']}")
         L.append("")
+    L += deps_section(d, meta)
     if red.get("dismissed"):
         L += ["## Dismissed by reducer", ""] + [f"- {x.get('title')}: {x.get('reason')}" for x in red["dismissed"]]
         L.append("")
@@ -970,6 +1213,7 @@ def main() -> None:
     x = sp.add_parser("verify"); x.add_argument("scan"); x.set_defaults(fn=cmd_verify)
     x = sp.add_parser("status"); x.add_argument("scan", nargs="?"); x.set_defaults(fn=cmd_status)
     x = sp.add_parser("coverage"); x.add_argument("scan"); x.set_defaults(fn=cmd_coverage)
+    x = sp.add_parser("deps"); x.add_argument("scan"); x.set_defaults(fn=cmd_deps)
     sp.add_parser("ask").set_defaults(fn=cmd_ask)
     sp.add_parser("repos").set_defaults(fn=cmd_repos)
     a = p.parse_args()

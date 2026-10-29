@@ -85,6 +85,11 @@ in the report), and the `unvalidated` reducer bucket (no priority, named `missin
 a verifier). The only port-side difference: `coverage` prints a JSON manifest like every other port
 command.
 
+Also synced the same day: the security top-lists matrix (`references/standards/standards.json`,
+`standards` + `owasp` tags in the plan and reduce prompts), the OSV-Scanner dependency scan
+(`deps <scan>`, also run by `map-begin`), and the logging / alerting / error-handling checklist
+(`references/checklists/`).
+
 ## Live install
 
 The port is installed as a global skill at `~/.minimax/skills/security-swarm/` and appears in the
