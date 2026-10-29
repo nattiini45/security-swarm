@@ -52,6 +52,8 @@ max_signals_per_file = 40 # signal lines shown to a worker per file (it can read
 data_dir = "./scans"
 playbook_max_companions = 2   # domain attack-class files injected per map batch (the core file is always in)
 playbook_max_chars = 60000    # hard cap on the injected attack-class playbook
+deps_scan = true              # run OSV-Scanner over lockfiles/manifests (sends package names+versions to osv.dev)
+osv_scanner_path = ""         # explicit osv-scanner binary; empty = PATH
 
 # Registered repos. `aliases` are what you may type; `ask = false` keeps a repo out of the
 # daily readiness question (the self-test fixture does this). Paths may be relative.

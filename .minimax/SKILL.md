@@ -112,6 +112,11 @@ launch the next. A full scan of a small repo is roughly one wave per stage.
 - **Coverage is selector recall.** A file no selector matches is never investigated. Read the
   selector table before approving a plan. Then read the report's **Not reviewed** / **Scope of this
   run** lines (`coverage-ledger.json`, `coverage <scan>`) and pass them on: unreviewed is not clean.
+- **Name the not-checked top-list categories.** The report's *Security top lists* table marks OWASP
+  categories nobody looked for as **not checked**; say which ones in the summary instead of calling
+  the scan complete. If a relevant category is not checked, re-plan with feedback to add a selector.
+- **Dependency CVEs are a separate section.** They come from OSV-Scanner, are not part of P0–P3 and
+  carry no reachability check. If the report says the dependency scan did not run, say that too.
 - **Unvalidated is not a severity.** Claims that hinge on a fact outside the repo carry no priority
   and a named `missing_fact`; report them as open questions, never fold them into P0–P3.
 - **A failed reduce falls back to raw, undeduplicated worker findings.** The report says

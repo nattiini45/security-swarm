@@ -1,0 +1,79 @@
+{
+  "_note": "Security top lists the report maps findings and selectors onto. Edit here when a list gets a new edition; ids must stay unique across lists. Sources are the official OWASP pages.",
+  "lists": [
+    {
+      "key": "top10",
+      "name": "OWASP Top 10:2025",
+      "source": "https://owasp.org/Top10/2025/",
+      "always": true,
+      "applies_when": "every codebase",
+      "categories": [
+        ["A01:2025", "Broken Access Control"],
+        ["A02:2025", "Security Misconfiguration"],
+        ["A03:2025", "Software Supply Chain Failures"],
+        ["A04:2025", "Cryptographic Failures"],
+        ["A05:2025", "Injection"],
+        ["A06:2025", "Insecure Design"],
+        ["A07:2025", "Authentication Failures"],
+        ["A08:2025", "Software or Data Integrity Failures"],
+        ["A09:2025", "Security Logging and Alerting Failures"],
+        ["A10:2025", "Mishandling of Exceptional Conditions"]
+      ]
+    },
+    {
+      "key": "api",
+      "name": "OWASP API Security Top 10:2023",
+      "source": "https://owasp.org/API-Security/editions/2023/en/0x11-t10/",
+      "always": false,
+      "applies_when": "the codebase serves an HTTP/RPC API",
+      "categories": [
+        ["API1:2023", "Broken Object Level Authorization"],
+        ["API2:2023", "Broken Authentication"],
+        ["API3:2023", "Broken Object Property Level Authorization"],
+        ["API4:2023", "Unrestricted Resource Consumption"],
+        ["API5:2023", "Broken Function Level Authorization"],
+        ["API6:2023", "Unrestricted Access to Sensitive Business Flows"],
+        ["API7:2023", "Server Side Request Forgery"],
+        ["API8:2023", "Security Misconfiguration"],
+        ["API9:2023", "Improper Inventory Management"],
+        ["API10:2023", "Unsafe Consumption of APIs"]
+      ]
+    },
+    {
+      "key": "llm",
+      "name": "OWASP Top 10 for LLM Applications 2025",
+      "source": "https://genai.owasp.org/llm-top-10/",
+      "always": false,
+      "applies_when": "the codebase calls language models, builds prompts or runs agents/tools",
+      "categories": [
+        ["LLM01:2025", "Prompt Injection"],
+        ["LLM02:2025", "Sensitive Information Disclosure"],
+        ["LLM03:2025", "Supply Chain"],
+        ["LLM04:2025", "Data and Model Poisoning"],
+        ["LLM05:2025", "Improper Output Handling"],
+        ["LLM06:2025", "Excessive Agency"],
+        ["LLM07:2025", "System Prompt Leakage"],
+        ["LLM08:2025", "Vector and Embedding Weaknesses"],
+        ["LLM09:2025", "Misinformation"],
+        ["LLM10:2025", "Unbounded Consumption"]
+      ]
+    },
+    {
+      "key": "masvs",
+      "name": "OWASP MASVS v2 (mobile)",
+      "source": "https://mas.owasp.org/MASVS/",
+      "always": false,
+      "applies_when": "the codebase ships an Android or iOS app",
+      "categories": [
+        ["MASVS-STORAGE", "Secure storage of sensitive data on the device"],
+        ["MASVS-CRYPTO", "Cryptographic functionality"],
+        ["MASVS-AUTH", "Authentication and authorization"],
+        ["MASVS-NETWORK", "Secure network communication"],
+        ["MASVS-PLATFORM", "Secure interaction with the platform and other apps"],
+        ["MASVS-CODE", "Data processing and keeping the app up to date"],
+        ["MASVS-RESILIENCE", "Resilience to reverse engineering and tampering"],
+        ["MASVS-PRIVACY", "User privacy controls"]
+      ]
+    }
+  ]
+}

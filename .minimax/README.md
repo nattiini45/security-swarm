@@ -94,6 +94,7 @@ swarm.py reduce-ingest <scan>
 swarm.py verify-begin <scan>
 swarm.py verify-ingest <scan>
 swarm.py report <scan>
+swarm.py deps <scan>                         # dependency scan (OSV-Scanner) only
 swarm.py coverage <scan>                     # coverage ledger: unreviewed / scoped-out files
 swarm.py status [<scan>]
 swarm.py ask
@@ -145,6 +146,22 @@ was not reviewed. `findings.json` carries the same data structurally; `threat-mo
   deterministically from the batch's own paths. Selectors say *where* to look; the playbook says *what
   to look for*. Vendored from [cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill)
   (MIT) — see `references/attack-classes/README.md` and `LICENSE-cloudflare`.
+- **Security top lists.** The planner picks which lists apply (OWASP Top 10:2025 always; API Security
+  Top 10:2023, LLM Top 10:2025 and MASVS v2 when the codebase has an API, model calls or a mobile app)
+  and tags every selector with the categories it looks for; the reducer tags every finding. The report
+  then lists every category as *finding*, *lead only*, *checked, nothing found* or **not checked**.
+  The lists live in `references/standards/standards.json` — update that file when OWASP publishes a
+  new edition.
+- **Dependency scan.** [OSV-Scanner](https://google.github.io/osv-scanner/) v2 runs over the snapshot's
+  lockfiles and manifests before the map stage (no model call) and the report gets a *Dependency
+  vulnerabilities* section with severity, fixed version and CVE ids. These are not counted in P0–P3:
+  reachability of the vulnerable function is not checked. Package names and versions are sent to the
+  osv.dev API; set `scan.deps_scan = false` to skip it. If the scanner is missing the report says so
+  instead of implying the dependencies are clean. Re-run alone with `swarm.py deps <scan>`.
+- **Logging, alerting and error handling.** `references/checklists/LOGGING-ALERTING-AND-ERROR-HANDLING.md`
+  (OWASP A09 + A10: missing security events, secrets in logs, log injection, failing open,
+  half-finished transactions, disclosing errors) joins the playbook for batches that touch logging,
+  audit, error handlers or middleware.
 - **Severity requires demonstrated impact.** Mappers and the reducer must name the concrete damage.
   A claim whose exploitability turns on a fact outside the repository (hosted DB grants, deployed
   limits, third-party behaviour) goes to an **Unvalidated** section with no priority and a named
@@ -163,7 +180,8 @@ was not reviewed. `findings.json` carries the same data structurally; `threat-mo
 
 ## Limitations
 
-- Static, source-level review. No running services, no dependency scanning, no secrets history search.
+- Static, source-level review. No running services, no secrets history search. Dependency CVEs come
+  from OSV-Scanner (needs the binary and network access to osv.dev).
 - One language-agnostic toolset (file read / search); no language servers.
 - The reducer is a single agent over all raw findings — a very large scan needs a generous context
   budget and enough child-agent time.
