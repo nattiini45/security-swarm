@@ -1,0 +1,4 @@
+title = "security-swarm gitleaks config"
+
+[extend]
+useDefault = true
