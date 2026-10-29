@@ -82,8 +82,10 @@ jobs:
     name: security / semgrep
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Advisory: findings are logged but never fail the run.
-    continue-on-error: true
+    # Advisory BY DESIGN of findings only, via the run block below (exit 1 = findings -> 0).
+    # No job-level continue-on-error: that would swallow tool failures (>=2) too and the
+    # exit-code gate could never fail the job.
+    continue-on-error: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -150,7 +152,12 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: zizmor --persona=regular --format=sarif .github/workflows > zizmor.sarif
+        run: |
+          # Redirect to a temp file so a crash cannot leave an empty zizmor.sarif behind for
+          # the upload guard to find: the real output is moved into place only on success.
+          zizmor --persona=regular --format=sarif .github/workflows > zizmor.sarif.tmp
+          test -s zizmor.sarif.tmp
+          mv zizmor.sarif.tmp zizmor.sarif
       - name: Upload zizmor SARIF
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
