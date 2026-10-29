@@ -1,0 +1,124 @@
+# Security Swarm config.
+#
+# OWNER CHOICE 2026-10-17 (Caspar, verbatim): "all agents deepseek-flash high effort."
+# Planner, mapper and reducer all run deepseek/deepseek-v4.1-flash on provider commandcode, reasoning high.
+# The previous locks (GLM 2026-10-10, Claude 2026-10-08) are preserved below as [models.glm_*] and
+# [models.claude_*] — restore those blocks and comment out the deepseek ones when Caspar says so.
+# Do not change models on your own.
+
+[models.planner]
+model = "deepseek/deepseek-v4.1-flash"
+provider = "commandcode"
+reasoning = "high"
+run_budget_s = 1800
+
+[models.mapper]
+model = "deepseek/deepseek-v4.1-flash"
+provider = "commandcode"
+reasoning = "high"
+run_budget_s = 900
+
+[models.reducer]
+model = "deepseek/deepseek-v4.1-flash"
+provider = "commandcode"
+reasoning = "high"
+run_budget_s = 3000  # 1500 timed out on the 70-finding TickeZIM reduce (183KB prompt); raised 2026-10-10 on Caspar's "rerun the reduce"
+
+# --- previous lock 2026-10-10 (GLM), kept for restore (do not enable without Caspar) ---
+[models.glm_planner]
+model = "glm-5.3"
+provider = "zai"
+reasoning = "high"
+run_budget_s = 1800
+
+[models.glm_mapper]
+model = "glm-5.3-flash"
+provider = "zai"
+reasoning = "high"
+run_budget_s = 900
+
+[models.glm_reducer]
+model = "glm-5.3"
+provider = "zai"
+reasoning = "high"
+run_budget_s = 3000
+
+# --- previous lock, kept for restore (do not enable without Caspar) ---
+[models.claude_planner]
+model = "claude-opus-5-5"
+provider = "anthropic"
+reasoning = "xhigh"
+run_budget_s = 1800
+
+[models.claude_mapper]
+model = "claude-haiku-5-5"
+provider = "anthropic"
+reasoning = "xhigh"
+run_budget_s = 900
+
+[models.claude_reducer]
+model = "claude-haiku-5-5"
+provider = "anthropic"
+reasoning = "xhigh"
+run_budget_s = 1500
+
+# Refutation stages — OWNER CHOICE 2026-10-18 (Caspar, verbatim): "One before the reduce, one
+# after. Flash for the before, main after." + "the after reduce should have 1 agent per claim,
+# not one total. We need absolute certainty." + "Not one refuter per finding before the reduce,
+# one refuter per swarm agent report.
+# On the GLM lock "flash" meant 5.3-Flash and "main" meant 5.3; the current owner lock (2026-10-17:
+# all agents deepseek-flash) leaves both stages on deepseek-flash — that is the substitute, not a
+# new choice. When the lock changes, map refute=<flash tier>, verify=<main tier>.
+
+[models.refute]           # ONE REFUTER AGENT PER MAPPER REPORT (per batch), before the reduce
+model = "deepseek/deepseek-v4.1-flash"
+provider = "commandcode"
+reasoning = "high"
+run_budget_s = 1800
+
+[models.verify]           # ONE FRESH AGENT PER CLAIM (each finding + each chain), after the reduce
+model = "deepseek/deepseek-v4.1-flash"
+provider = "commandcode"
+reasoning = "high"
+run_budget_s = 900
+
+[scan]
+batch_size = 5            # files with signals per map worker (Devin default: 5)
+concurrency = 6           # parallel map workers
+max_signals_per_file = 40 # signal lines shown to a worker per file (it can read the whole file anyway)
+data_dir = "C:/Users/ccabe/AppData/Local/hermes/security-swarm"
+playbook_max_companions = 2   # domain attack-class files injected per batch (core file is always in)
+playbook_max_chars = 60000    # hard cap on the injected attack-class playbook
+deps_scan = true              # OSV-Scanner over lockfiles/manifests (sends package names+versions to osv.dev)
+osv_scanner_path = "C:/Users/ccabe/bin/osv/osv-scanner.exe"  # 2.7.0, sha256-verified 29.10.2026
+
+# Repos offered by the daily 19:00 readiness question. `aliases` are what Caspar may type.
+[repos.plc-toolkit]
+path = "D:/Projects/plc-toolkit"
+aliases = ["toolkit", "plc", "plc-toolkit"]
+notes = "Public web app at plc-toolkit.com with real users."
+ask = true
+
+[repos.traqprep]
+path = "D:/Projects/Traqprep"
+aliases = ["traqprep", "traq"]
+notes = "Android-first, local-first app; Google Calendar + Microsoft Graph OAuth connectors."
+
+[repos.quire]
+path = "D:/Projects/quire"
+aliases = ["quire"]
+notes = "Vite + Playwright project."
+
+[repos.tickezim]
+path = "D:/Projects/TickeZIM"
+aliases = ["tickezim", "ticke"]
+notes = "Devin-owned ticketing app: app/ (405 tracked files), prisma, e2e; GitHub nattiini45/TickeZIM, branch master. Dev server runs via tsx watch on ports 3000/24678 — leave it alone."
+ask = true
+
+# Self-test fixture with planted vulns (SQLi, path traversal, SSRF, hardcoded JWT secret,
+# unauth invite-token leak that chains into team-admin takeover). Never offered in the daily ask.
+[repos.selftest]
+path = "C:/Users/ccabe/AppData/Local/hermes/tools/security-swarm/fixtures/teamboard"
+aliases = ["selftest"]
+notes = "Self-test fixture: Express + SQLite multi-team API. Attackers: unauthenticated internet user, authenticated member of another team."
+ask = false
