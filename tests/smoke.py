@@ -45,12 +45,45 @@ def prompt_fields(src: str) -> dict[str, list[str]]:
 
 def dircmp_equal(a: Path, b: Path) -> bool:
     c = filecmp.dircmp(a, b)
-    if c.left_only or c.right_only or c.funny_files:
+    if c.left_only or c.right_only or c.funny_files or c.common_funny:
         return False
+    for name in c.common_files:
+        if not (a / name).is_file() or not (b / name).is_file():
+            return False
     _, mismatch, errors = filecmp.cmpfiles(a, b, c.common_files, shallow=False)
     if mismatch or errors:
         return False
+    for name in c.common_dirs:
+        if not (a / name).is_dir() or not (b / name).is_dir():
+            return False
     return all(dircmp_equal(a / d, b / d) for d in c.common_dirs)
+
+
+def fixture_lockfile_check() -> None:
+    """The fixture lockfiles are hand-maintained: assert package.json and package-lock.json agree."""
+    for rel in ("fixtures", ".minimax/fixtures"):
+        for name in ("teamboard", "teamboard-hardened"):
+            base = ROOT / rel / name
+            pj, pl = base / "package.json", base / "package-lock.json"
+            if not pj.exists():
+                continue
+            want = json.loads(pj.read_text(encoding="utf-8")).get("dependencies", {})
+            if not pl.exists():
+                # teamboard (the vulnerable fixture) ships without a lockfile on purpose: the
+                # smoke pipeline never installs it. Only the hardened twin is locked.
+                if name == "teamboard" and "teamboard-hardened" not in str(base):
+                    continue
+                check(not want, f"{rel}/{name}: no lockfile but package.json declares deps")
+                continue
+            lock = json.loads(pl.read_text(encoding="utf-8"))
+            root = lock.get("packages", {}).get("", {})
+            have = root.get("dependencies", {})
+            check(want == have,
+                  f"{rel}/{name}: lockfile root deps match package.json ({sorted(want)})")
+            entries = lock.get("packages", {})
+            missing = [d for d in want if f"node_modules/{d}" not in entries]
+            check(not missing, f"{rel}/{name}: every declared dependency is in the lockfile "
+                               + (f"(missing: {missing})" if missing else ""))
 
 
 def static_checks() -> None:
@@ -62,6 +95,13 @@ def static_checks() -> None:
         except SyntaxError as e:
             check(False, f"{name}: swarm.py syntax error {e}")
             continue
+        for m in re.finditer(r"\.extractall\(([^)]*)\)", src):
+            args = m.group(1)
+            if "filter=" not in args or "filter=None" in args:
+                check(False, f"{name}: extractall call without a non-None filter: {args!r}")
+                break
+        else:
+            check(True, f"{name}: every extractall call passes a non-None filter")
         fields = prompt_fields(src)
         check(set(fields) == {"plan", "map", "refute", "reduce", "verify"},
               f"{name}: engine formats all five prompts ({sorted(fields)})")
@@ -79,6 +119,7 @@ def static_checks() -> None:
             check(False, f"{name}: standards.json {e}")
     check(dircmp_equal(ROOT / "references", ROOT / ".minimax" / "references"),
           "references/ is identical in both trees")
+    fixture_lockfile_check()
 
 
 def engine_checks(work: Path) -> None:
@@ -111,7 +152,11 @@ print("engine ok")
     check(p.returncode == 0, "root: engine functions + report render" + ("" if p.returncode == 0 else
                                                                        f"\n{p.stdout}{p.stderr}"))
     p = subprocess.run([sys.executable, "swarm.py", "--help"], cwd=str(root), capture_output=True, text=True)
-    check(p.returncode == 0 and "deps" in p.stdout and "coverage" in p.stdout, "root: CLI help lists deps + coverage")
+    check(p.returncode == 0 and "{plan,approve,run,verify,status,coverage,deps,ask,repos}" in p.stdout,
+          "root: CLI help lists every subcommand")
+    p = subprocess.run([sys.executable, "swarm.py", "coverage", "nosuchscan"], cwd=str(root),
+                       capture_output=True, text=True)
+    check(p.returncode != 0, "root: an unknown scan id exits non-zero")
 
 
 def minimax_pipeline(work: Path) -> None:
@@ -141,7 +186,8 @@ def minimax_pipeline(work: Path) -> None:
         sid = m["scan"]
         task = m.get("task") or m["tasks"][0]
         plan_text = Path(task["prompt"]).read_text(encoding="utf-8")
-        check("SECURITY TOP LISTS" in plan_text, "minimax: plan prompt carries the standards catalog")
+        check("SECURITY TOP LISTS" in plan_text and "A01:2025" in plan_text and "top10" in plan_text,
+              "minimax: plan prompt carries the standards catalog content")
         reply(task["out"], {"threat_model": "tm", "investigation_guidance": "g", "severity_criteria": "s",
                             "exclude_globs": [], "standards": ["top10", "api"],
                             "selectors": [{"id": "routes", "category": "input", "description": "routes",
@@ -152,18 +198,31 @@ def minimax_pipeline(work: Path) -> None:
         m = run("map-begin", sid)
         check(bool(m.get("coverage")), "minimax: map-begin reports coverage")
         first = Path(m["tasks"][0]["prompt"]).read_text(encoding="utf-8")
-        check("ATTACK-CLASS PLAYBOOK" in first, "minimax: map prompt carries the attack playbook")
-        for t in m["tasks"]:
+        core = (ROOT / ".minimax" / "references" / "attack-classes" / "ATTACK-CLASSES.md").read_text(encoding="utf-8")
+        # Assert real checklist content, not the playbook's constant heading (review F2).
+        body = next((ln.strip() for ln in core.splitlines()
+                     if len(ln.strip()) > 40 and not ln.startswith("#") and not ln.startswith("-")), "State machine violations")
+        check(body in first, f"minimax: map prompt carries the attack playbook body ({body[:50]!r})")
+        map_tasks = m["tasks"]
+        for t in map_tasks:
             reply(t["out"], {"findings": [{"title": "SQLi", "severity": "high",
                                            "locations": [{"path": "src/routes/search.js", "lines": "1"}]}]})
-        run("map-ingest", sid)
+        m = run("map-ingest", sid)
+        check(m.get("raw_findings") == len(map_tasks) and not m.get("failed_batches")
+              and not m.get("coverage_gap"), "minimax: every map batch ingested (manifest)")
         m = run("refute-begin", sid)
-        for t in m["tasks"]:
+        refute_tasks = m["tasks"]
+        check(len(refute_tasks) >= 1, "minimax: mapper finding reached the refuter")
+        for t in refute_tasks:
             reply(t["out"], {"verdicts": [{"finding": 1, "verdict": "stands"}]})
         run("refute-ingest", sid)
         m = run("reduce-begin", sid)
         reduce_text = Path(m["task"]["prompt"]).read_text(encoding="utf-8")
-        check("SECURITY TOP LISTS" in reduce_text, "minimax: reduce prompt carries the standards catalog")
+        check("SECURITY TOP LISTS" in reduce_text and "A01:2025" in reduce_text and "top10" in reduce_text,
+              "minimax: reduce prompt carries the standards catalog content")
+        check(m.get("n_findings") == len(map_tasks), "minimax: every mapper finding reached the reducer")
+        check("SQLi" in reduce_text and "src/routes/search.js" in reduce_text,
+              "minimax: map -> reduce data path (finding content in the reduce prompt)")
         reply(m["task"]["out"], {"summary": "s", "chains": [], "dismissed": [],
                                  "findings": [{"id": "F1", "priority": "P1", "title": "SQLi", "owasp": ["A05:2025"],
                                                "locations": [{"path": "src/routes/search.js", "lines": "1"}]}],
@@ -172,7 +231,9 @@ def minimax_pipeline(work: Path) -> None:
         m = run("verify-begin", sid)
         for t in m["tasks"]:
             reply(t["out"], {"verdict": "confirmed", "reason": "r", "evidence": []})
-        run("verify-ingest", sid)
+        m = run("verify-ingest", sid)
+        check(m.get("confirmed", 0) >= 1 and m.get("unverified", 0) == 0,
+              "minimax: verifier verdicts ingested (manifest)")
         run("coverage", sid)
         run("deps", sid)
         rep = Path(run("report", sid)["report"]).read_text(encoding="utf-8")

@@ -216,7 +216,10 @@ def make_snapshot(repo_path: str, dest: Path, ref: str = "HEAD") -> dict:
     dest.mkdir(parents=True, exist_ok=True)
     with tarfile.open(fileobj=io.BytesIO(tar_bytes)) as tf:  # nosemgrep: trailofbits.python.tarfile-extractall-traversal.tarfile-extractall-traversal
         # filter="data" (PEP 706) rejects absolute paths, ".." and links leaving dest; the tar is git archive output.
-        tf.extractall(dest, filter="data")
+        # The nosemgrep is repeated here because semgrep can report the finding at the extractall
+        # call rather than at the with-statement, and it only honours a directive on the finding's
+        # own line or the line directly above it.
+        tf.extractall(dest, filter="data")  # nosemgrep: trailofbits.python.tarfile-extractall-traversal.tarfile-extractall-traversal
     return {"commit": commit, "branch": branch, "uncommitted_changes_excluded": len(dirty)}
 
 
