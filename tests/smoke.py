@@ -47,20 +47,25 @@ def dircmp_equal(a: Path, b: Path) -> bool:
     c = filecmp.dircmp(a, b)
     if c.left_only or c.right_only or c.funny_files or c.common_funny:
         return False
-    for name in c.common_files:
-        if not (a / name).is_file() or not (b / name).is_file():
+    for name in c.common_files + c.common_dirs:
+        # is_file()/is_dir() follow symlinks, so a link to a matching target would pass
+        # silently. Only real regular files / real directories count as identical.
+        for side in (a / name, b / name):
+            if side.is_symlink() or not side.exists():
+                return False
+        if (a / name).is_file() != (b / name).is_file():
+            return False
+        if (a / name).is_dir() != (b / name).is_dir():
             return False
     _, mismatch, errors = filecmp.cmpfiles(a, b, c.common_files, shallow=False)
     if mismatch or errors:
         return False
-    for name in c.common_dirs:
-        if not (a / name).is_dir() or not (b / name).is_dir():
-            return False
     return all(dircmp_equal(a / d, b / d) for d in c.common_dirs)
 
 
 def fixture_lockfile_check() -> None:
     """The fixture lockfiles are hand-maintained: assert package.json and package-lock.json agree."""
+    checked = 0
     for rel in ("fixtures", ".minimax/fixtures"):
         for name in ("teamboard", "teamboard-hardened"):
             base = ROOT / rel / name
@@ -71,10 +76,11 @@ def fixture_lockfile_check() -> None:
             if not pl.exists():
                 # teamboard (the vulnerable fixture) ships without a lockfile on purpose: the
                 # smoke pipeline never installs it. Only the hardened twin is locked.
-                if name == "teamboard" and "teamboard-hardened" not in str(base):
+                if name == "teamboard":
                     continue
                 check(not want, f"{rel}/{name}: no lockfile but package.json declares deps")
                 continue
+            checked += 1
             lock = json.loads(pl.read_text(encoding="utf-8"))
             root = lock.get("packages", {}).get("", {})
             have = root.get("dependencies", {})
@@ -84,6 +90,7 @@ def fixture_lockfile_check() -> None:
             missing = [d for d in want if f"node_modules/{d}" not in entries]
             check(not missing, f"{rel}/{name}: every declared dependency is in the lockfile "
                                + (f"(missing: {missing})" if missing else ""))
+    check(checked > 0, "lockfile check validated at least one fixture (not vacuous)")
 
 
 def static_checks() -> None:
@@ -95,13 +102,12 @@ def static_checks() -> None:
         except SyntaxError as e:
             check(False, f"{name}: swarm.py syntax error {e}")
             continue
-        for m in re.finditer(r"\.extractall\(([^)]*)\)", src):
-            args = m.group(1)
-            if "filter=" not in args or "filter=None" in args:
-                check(False, f"{name}: extractall call without a non-None filter: {args!r}")
-                break
-        else:
-            check(True, f"{name}: every extractall call passes a non-None filter")
+        calls = re.findall(r"\.extractall\(([^)]*)\)", src)
+        check(bool(calls), f"{name}: swarm.py still unpacks the archive (>=1 extractall call)")
+        bad = [args for args in calls if "filter=\"data\"" not in args]
+        check(not bad,
+              f"{name}: every extractall call passes filter=\"data\""
+              + (f" (offenders: {bad})" if bad else ""))
         fields = prompt_fields(src)
         check(set(fields) == {"plan", "map", "refute", "reduce", "verify"},
               f"{name}: engine formats all five prompts ({sorted(fields)})")
@@ -151,12 +157,31 @@ print("engine ok")
     p = subprocess.run([sys.executable, "-c", code], cwd=str(root), capture_output=True, text=True)
     check(p.returncode == 0, "root: engine functions + report render" + ("" if p.returncode == 0 else
                                                                        f"\n{p.stdout}{p.stderr}"))
-    p = subprocess.run([sys.executable, "swarm.py", "--help"], cwd=str(root), capture_output=True, text=True)
-    check(p.returncode == 0 and "{plan,approve,run,verify,status,coverage,deps,ask,repos}" in p.stdout,
-          "root: CLI help lists every subcommand")
-    p = subprocess.run([sys.executable, "swarm.py", "coverage", "nosuchscan"], cwd=str(root),
-                       capture_output=True, text=True)
-    check(p.returncode != 0, "root: an unknown scan id exits non-zero")
+    # The CLI reads swarm.toml at import time, so run it in a scratch dir with a config copy.
+    cli_dir = root / ".minimax"
+    p = subprocess.run([sys.executable, "swarm.py", "--help"], cwd=str(cli_dir), capture_output=True, text=True)
+    subs = set(re.findall(r"add_parser\(\"(\w+)\"", (root / "swarm.py").read_text(encoding="utf-8")))
+    check(p.returncode == 0 and subs == {"plan", "approve", "run", "verify", "status", "coverage", "deps", "ask", "repos"},
+          f"root: CLI exposes exactly the documented subcommands ({sorted(subs)})")
+    # argparse errors are exit 2; a real "no such scan" is exit 1 (sys.exit(str)).
+    for args, want in ((["badcmd"], 2), (["coverage"], 2), (["coverage", "nosuchscan"], 1)):
+        p = subprocess.run([sys.executable, "swarm.py", *args], cwd=str(cli_dir),
+                           capture_output=True, text=True)
+        check(p.returncode == want,
+              f"root: {' '.join(args)} exits exactly {want} (got {p.returncode})")
+
+
+def catalog_fragments() -> list:
+    """Real content from standards.json (not headings a prompt template can print on its own)."""
+    data = json.loads((ROOT / "references" / "standards" / "standards.json").read_text(encoding="utf-8"))
+    out = [lst["name"] for lst in data["lists"]]
+    for lst in data["lists"]:
+        out += [cid for cid, cname in lst["categories"][:2]]
+        out += [lst["categories"][0][1]]
+    return [frag for frag in out if frag]
+
+
+CATALOG_FRAGS = catalog_fragments()
 
 
 def minimax_pipeline(work: Path) -> None:
@@ -186,8 +211,8 @@ def minimax_pipeline(work: Path) -> None:
         sid = m["scan"]
         task = m.get("task") or m["tasks"][0]
         plan_text = Path(task["prompt"]).read_text(encoding="utf-8")
-        check("SECURITY TOP LISTS" in plan_text and "A01:2025" in plan_text and "top10" in plan_text,
-              "minimax: plan prompt carries the standards catalog content")
+        missing = [f for f in CATALOG_FRAGS if f not in plan_text]
+        check(not missing, f"minimax: plan prompt carries the standards catalog content (missing {missing})")
         reply(task["out"], {"threat_model": "tm", "investigation_guidance": "g", "severity_criteria": "s",
                             "exclude_globs": [], "standards": ["top10", "api"],
                             "selectors": [{"id": "routes", "category": "input", "description": "routes",
@@ -200,9 +225,12 @@ def minimax_pipeline(work: Path) -> None:
         first = Path(m["tasks"][0]["prompt"]).read_text(encoding="utf-8")
         core = (ROOT / ".minimax" / "references" / "attack-classes" / "ATTACK-CLASSES.md").read_text(encoding="utf-8")
         # Assert real checklist content, not the playbook's constant heading (review F2).
-        body = next((ln.strip() for ln in core.splitlines()
-                     if len(ln.strip()) > 40 and not ln.startswith("#") and not ln.startswith("-")), "State machine violations")
-        check(body in first, f"minimax: map prompt carries the attack playbook body ({body[:50]!r})")
+        bodies = [ln.strip() for ln in core.splitlines()
+                  if len(ln.strip()) > 40 and not ln.startswith("#") and not ln.startswith("-")]
+        check(len(bodies) >= 3,
+              f"attack playbook has real checklist rows to assert ({len(bodies)} found)")
+        missing = [b[:60] for b in bodies if b not in first]
+        check(not missing, f"minimax: map prompt carries the attack playbook rows (missing {missing})")
         map_tasks = m["tasks"]
         for t in map_tasks:
             reply(t["out"], {"findings": [{"title": "SQLi", "severity": "high",
@@ -218,8 +246,8 @@ def minimax_pipeline(work: Path) -> None:
         run("refute-ingest", sid)
         m = run("reduce-begin", sid)
         reduce_text = Path(m["task"]["prompt"]).read_text(encoding="utf-8")
-        check("SECURITY TOP LISTS" in reduce_text and "A01:2025" in reduce_text and "top10" in reduce_text,
-              "minimax: reduce prompt carries the standards catalog content")
+        missing = [f for f in CATALOG_FRAGS if f not in reduce_text]
+        check(not missing, f"minimax: reduce prompt carries the standards catalog content (missing {missing})")
         check(m.get("n_findings") == len(map_tasks), "minimax: every mapper finding reached the reducer")
         check("SQLi" in reduce_text and "src/routes/search.js" in reduce_text,
               "minimax: map -> reduce data path (finding content in the reduce prompt)")
