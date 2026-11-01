@@ -3,3 +3,4 @@ swarm.toml
 __pycache__/
 *.pyc
 node_modules/
+.zcode/workflow-drafts/

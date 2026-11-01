@@ -124,6 +124,46 @@ Per-stage output contracts live in `prompts/`: `plan.md` (threat model + selecto
 (single-claim verdict). Each prompt is a plain Markdown template — adapt them freely; keep the defensive
 preamble (see below).
 
+## ZCode workflow
+
+The skill also ships as a ZCode dynamic workflow: `.zcode/workflows/security-swarm.dwf.ts` (this
+repo) and the same file installed at `~/.zcode/workflows/security-swarm.dwf.ts` (user level —
+runnable from any project on that machine). It replaces the one-shot agent CLI with fresh,
+isolated ZCode subagents, so there is no `swarm.toml` and no model blocks to fill in.
+
+Run it by asking ZCode to run the saved workflow `security-swarm` on the current workspace, with
+three arguments:
+
+| argument | default | meaning |
+|---|---|---|
+| `notes` | `""` | owner notes for the planner (what this app is, where it runs, what matters most) |
+| `batchSize` | `5` | files per review batch (one reviewer subagent each) |
+| `maxBatches` | `8` | batch cap per run; a partial run is flagged in the report |
+
+Stage mapping and intentional differences from `swarm.py`:
+
+- **Roles → subagents.** Planner, one mapper per batch, one adversarial refuter per mapper
+  report, one reducer, and one fresh verifier per claim are separate subagent contexts — fresh
+  context per call, no memory, no fallback models. Refuters still fail open; verifiers still
+  fail closed. The defensive preamble is preserved verbatim in every persona.
+- **Approval gate.** The threat model and selector table are published as a card and the run
+  parks at an "Approve the scan plan" station until it is approved; selectors that error
+  (invalid regex, over the match cap) return for a re-plan instead of being approved through —
+  same rule as `swarm.py approve` refusing on selector errors.
+- **Sharding.** Selectors are executed by the workflow engine itself as recorded
+  `files.grep` / `files.glob` reads. Patterns are JavaScript regex, not Rust: lookaround is
+  allowed, but there is no inline `(?i)` — case-insensitive selectors use character classes
+  (e.g. `[Ss]ecret`).
+- **Snapshot → working tree.** Subagents review the live working tree (read-only by
+  instruction) instead of a `git archive` snapshot of committed HEAD; a dirty tree is flagged
+  in the report instead.
+- **Self-contained.** The attack-class companions and `standards.json` are not read from this
+  repo: a compact core playbook and the four catalogs (Top 10:2025, API:2023, LLM:2025,
+  MASVS v2) are embedded in the workflow so it works at user level from any project.
+- **Out of scope.** No OSV-Scanner dependency scan; no sandbox reproduction, as in the Python
+  pipeline. Resumes and amendments replay recorded reads and matched asks instead of
+  `scans/<id>/` cache files.
+
 ## Configuration
 
 See `swarm.example.toml`. `[models.*]` pins five roles; `[scan]` sets batch size, concurrency, the
