@@ -167,8 +167,11 @@ print("engine ok")
     for args, want in ((["badcmd"], 2), (["coverage"], 2), (["coverage", "nosuchscan"], 1)):
         p = subprocess.run([sys.executable, "swarm.py", *args], cwd=str(cli_dir),
                            capture_output=True, text=True)
-        check(p.returncode == want,
-              f"root: {' '.join(args)} exits exactly {want} (got {p.returncode})")
+        # Exit 1 is also what an uncaught exception gives, so pin the graceful message too.
+        graceful = want != 1 or ("no scan 'nosuchscan'" in p.stderr and "Traceback" not in p.stderr)
+        check(p.returncode == want and graceful,
+              f"root: {' '.join(args)} exits exactly {want} (got {p.returncode})"
+              + ("" if p.returncode == want and graceful else f"\n{p.stdout}{p.stderr}"))
 
 
 def catalog_fragments() -> list:

@@ -155,7 +155,14 @@ jobs:
         run: |
           # Redirect to a temp file so a crash cannot leave an empty zizmor.sarif behind for
           # the upload guard to find: the real output is moved into place only on success.
+          # With --format=sarif zizmor never uses the findings exit codes (11-14); findings live
+          # in the SARIF and the exit is 0. Any non-zero exit is a tool failure (1 audit error,
+          # 2 bad arguments, 3 no inputs): https://docs.zizmor.sh/usage/#exit-codes
+          set +e
           zizmor --persona=regular --format=sarif .github/workflows > zizmor.sarif.tmp
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then echo "zizmor failed (exit $rc), not a findings exit" >&2; exit "$rc"; fi
           test -s zizmor.sarif.tmp
           mv zizmor.sarif.tmp zizmor.sarif
       - name: Upload zizmor SARIF
