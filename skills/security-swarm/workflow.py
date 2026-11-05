@@ -8,8 +8,14 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from typing import Any, Awaitable, Callable
 
-CONFIG = {}
+agent: Callable[..., Awaitable[dict[str, Any]]]
+register_workflow: Callable[[dict[str, Any]], Awaitable[None]]
+log: Callable[[str], None]
+WorkflowAgentError: type[Exception]
+
+CONFIG: dict[str, Any] = {}
 
 
 def digest(value):
@@ -38,6 +44,8 @@ def load_engine(root, output):
     os.environ["SWARM_CONFIG"] = str(config)
     try:
         spec = importlib.util.spec_from_file_location("devin_swarm_engine", root / "swarm.py")
+        if spec is None or spec.loader is None:
+            raise ValueError("Cannot load Security Swarm engine")
         engine = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(engine)
         return engine
@@ -203,7 +211,7 @@ async def main():
     meta["map_failed"] = [r["batch"] for r, _ in results if r.get("failed")]
     kept = [f for _, (live, _) in results for f in live]
     removed = [f for _, (_, dead) in results for f in dead]
-    red = {"summary": "No worker reported a surviving finding.", "findings": [], "chains": [], "dismissed": []}
+    red: dict[str, Any] = {"summary": "No worker reported a surviving finding.", "findings": [], "chains": [], "dismissed": []}
     if kept:
         try:
             log("Reducing all surviving reports")

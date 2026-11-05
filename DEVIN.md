@@ -58,3 +58,8 @@ coverage gaps. Use the same script and `run_id` for runtime journal replay/resum
   OS-enforced isolation. Source-only confirmation is not sandbox reproduction.
 - No live cloud scan is part of the offline test suite. Run
   `python tests/devin_smoke.py` and `python tests/smoke.py` with Python 3.11+.
+
+For development checks, install `requirements-dev.txt` in an isolated venv, then
+run `ruff check skills/security-swarm/workflow.py tests/devin_smoke.py` and
+`mypy --check-untyped-defs skills/security-swarm/workflow.py`. The runtime names
+are annotated without assigning or replacing Devin's injected functions.

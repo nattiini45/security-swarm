@@ -13,7 +13,7 @@ Use this port, not the Hermes CLI or ZCode TypeScript workflow. Read
    setup, available access, and dirty state before fan-out. This scans a committed
    snapshot only; disclose excluded local changes. Do not commit them for a scan.
 2. Copy `workflow.py` beside this skill to a persistent engagement directory.
-   Replace only the `CONFIG = {}` line with a Python literal containing the
+   Fill only the `CONFIG` dictionary with a Python literal containing the
    absolute `source_dir` (this plugin root), `repo_path`, cloud `repo`
    (`github.com/owner/name`), full `commit`, and absolute `output_dir`.
    Set `mode` to `plan`. Never edit the installed template. Explain the stage
