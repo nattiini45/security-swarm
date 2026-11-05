@@ -1,0 +1,5 @@
+{
+  "name": "security-swarm-devin",
+  "version": "1.0.0",
+  "description": "Approval-gated defensive MapReduce security review for Devin"
+}

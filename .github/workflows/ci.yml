@@ -30,3 +30,5 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
       - name: Smoke test
         run: python tests/smoke.py
+      - name: Devin workflow contracts (offline)
+        run: python tests/devin_smoke.py
