@@ -17,6 +17,12 @@ Invoke the skill in a session with the target repository available. The host cop
 the template, fills the `CONFIG` literal, and passes that file to `run_workflow`.
 Python 3.11+, git and ripgrep must be available on the controller. Agents use separate
 VMs and `git show` against the exact source SHA; uncommitted changes are excluded.
+Each invocation first dispatches a read-only source preflight through the agent
+repository integration. It must return the exact commit and root tree IDs before
+the planner or reviewers run. Local-only/inaccessible commits fail explicitly;
+publish them through your normal authorized Git workflow first, never as a scan
+side effect. The extracted controller snapshot is digest-bound to approval and
+checked again before reuse; altered snapshots require a fresh engagement directory.
 
 ```python
 CONFIG = {

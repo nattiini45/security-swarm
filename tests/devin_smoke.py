@@ -49,6 +49,8 @@ class WorkflowTests(unittest.TestCase):
             self.calls.append((phase, prompt))
             self.assertIn(workflow.CONFIG["commit"], prompt)
             self.assertNotIn("vm_mode", kwargs)
+            if kwargs["label"] == "source-preflight":
+                return {"commit": workflow.CONFIG["commit"], "tree": self.git("rev-parse", "HEAD^{tree}").strip()}
             if phase in self.fail:
                 raise AgentFailure(phase)
             if phase == "plan":
@@ -88,7 +90,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_plan_stops_and_digest_binds_batching(self):
         self.approve()
-        self.assertEqual([p for p, _ in self.calls], ["plan"])
+        self.assertEqual([p for p, _ in self.calls], ["plan", "plan"])
         workflow.CONFIG["batch_size"] = 2
         with self.assertRaisesRegex(ValueError, "approval"):
             self.run_workflow()
@@ -148,6 +150,55 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(len(workflow.filter_report(report, [verdict, verdict])[0]), 1)
         self.assertEqual(len(workflow.filter_report(report, [{**verdict, "evidence": ""}])[0]), 1)
         self.assertEqual(len(workflow.filter_report(report, [verdict])[1]), 1)
+
+    def test_malformed_refutation_and_verification_evidence(self):
+        report = {"batch": "B1", "findings": [{"title": "Keep"}]}
+        refutation = {"finding": 1, "verdict": "refuted", "reason": "guard", "evidence": "source quote"}
+        verification = {"claim": "F", "verdict": "confirmed", "reason": "source", "evidence": []}
+        for bad in (True, 1, ["not text"], {"not": "text"}, " ", "", None):
+            for field in ("reason", "evidence"):
+                self.assertEqual(len(workflow.filter_report(report, [{**refutation, field: bad}])[0]), 1)
+            for field in ("path", "lines", "quote"):
+                evidence = {"path": "app.py", "lines": "1", "quote": "value = input()", field: bad}
+                self.assertEqual(workflow.normalize_verdict({**verification, "evidence": [evidence]}, "F")["verdict"], "unverified")
+
+    def test_unavailable_integrated_commit_blocks_before_planning(self):
+        original = workflow.agent
+
+        async def unavailable(prompt, **kwargs):
+            if kwargs["label"] == "source-preflight":
+                return {"commit": "", "tree": ""}
+            return await original(prompt, **kwargs)
+
+        workflow.agent = unavailable
+        with self.assertRaisesRegex(ValueError, "Pinned source unavailable"):
+            self.run_workflow()
+        self.assertEqual(self.calls, [])
+        self.assertFalse((self.output / "plan.json").exists())
+
+    def test_modified_snapshot_invalidates_approval_before_dispatch(self):
+        self.approve()
+        (self.output / "snapshot/app.py").write_text("changed source")
+        before = len(self.calls)
+        with self.assertRaisesRegex(ValueError, "Snapshot/assets changed"):
+            self.run_workflow()
+        self.assertEqual(len(self.calls), before)
+
+    def test_malformed_chain_uses_reducer_fallback_and_still_reports(self):
+        self.approve()
+        original = workflow.agent
+
+        async def malformed(prompt, **kwargs):
+            reply = await original(prompt, **kwargs)
+            if kwargs["phase"] == "reduce":
+                reply["chains"][0]["steps"] = [{"id": "F1"}]
+            return reply
+
+        workflow.agent = malformed
+        self.run_workflow()
+        red = json.loads((self.output / "findings.json").read_text())
+        self.assertTrue(red["reducer_failed"])
+        self.assertTrue((self.output / "report.md").is_file())
 
 
 if __name__ == "__main__":

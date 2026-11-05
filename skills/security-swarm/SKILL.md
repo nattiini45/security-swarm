@@ -17,7 +17,7 @@ Use this port, not the Hermes CLI or ZCode TypeScript workflow. Read
    absolute `source_dir` (this plugin root), `repo_path`, cloud `repo`
    (`github.com/owner/name`), full `commit`, and absolute `output_dir`.
    Set `mode` to `plan`. Never edit the installed template. Explain the stage
-   graph and approximate agent count (planner + up to N mapper/refuter pairs +
+   graph and approximate agent count (source preflight per invocation + planner + up to N mapper/refuter pairs +
    reducer + one verifier per claim) before launching.
 3. Call `run_workflow` with that script's absolute `script_path`. Attach the
    resulting threat model and selector counts to the user. Surface zero-match
