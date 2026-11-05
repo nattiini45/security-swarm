@@ -2,5 +2,7 @@ scans/
 swarm.toml
 __pycache__/
 *.pyc
+.ruff_cache/
+.mypy_cache/
 node_modules/
 .tmp-*

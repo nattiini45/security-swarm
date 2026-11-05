@@ -30,3 +30,11 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
       - name: Smoke test
         run: python tests/smoke.py
+      - name: Devin workflow contracts (offline)
+        run: python tests/devin_smoke.py
+      - name: Install development checks
+        run: python -m pip install -r requirements-dev.txt
+      - name: Lint native port
+        run: ruff check skills/security-swarm/workflow.py tests/devin_smoke.py
+      - name: Type-check native port
+        run: mypy --check-untyped-defs skills/security-swarm/workflow.py
