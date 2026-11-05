@@ -176,6 +176,23 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
         self.assertFalse((self.output / "plan.json").exists())
 
+    def test_mixed_valid_and_malformed_verifier_evidence_still_renders(self):
+        self.approve()
+        original = workflow.agent
+
+        async def mixed(prompt, **kwargs):
+            reply = await original(prompt, **kwargs)
+            if kwargs["phase"] == "verify":
+                reply["evidence"].extend([True, {"path": " ", "lines": 1, "quote": 42}])
+            return reply
+
+        workflow.agent = mixed
+        self.run_workflow()
+        red = json.loads((self.output / "findings.json").read_text())
+        for claim in red["findings"] + red["chains"]:
+            self.assertEqual(len(claim["verification"]["evidence"]), 1)
+        self.assertTrue((self.output / "report.md").is_file())
+
     def test_modified_snapshot_invalidates_approval_before_dispatch(self):
         self.approve()
         (self.output / "snapshot/app.py").write_text("changed source")

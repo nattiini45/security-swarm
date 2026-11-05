@@ -99,11 +99,11 @@ def normalize_verdict(reply, claim_id):
             or not isinstance(reply.get("reason"), str)
             or not isinstance(reply.get("evidence"), list)):
         return {"claim": claim_id, "verdict": "unverified", "reason": "Invalid verifier reply", "evidence": []}
-    if reply["verdict"] != "unverified" and not any(
-            isinstance(e, dict) and all(nonempty_text(e.get(k)) for k in ("path", "lines", "quote"))
-            for e in reply["evidence"]):
+    evidence = [e for e in reply["evidence"] if isinstance(e, dict)
+                and all(nonempty_text(e.get(k)) for k in ("path", "lines", "quote"))]
+    if reply["verdict"] != "unverified" and not evidence:
         return {"claim": claim_id, "verdict": "unverified", "reason": "No quoted source evidence", "evidence": []}
-    return reply
+    return {**reply, "evidence": evidence}
 
 
 async def main():
