@@ -1,0 +1,2 @@
+target-version = "py311"
+builtins = ["agent", "register_workflow", "log", "WorkflowAgentError"]

@@ -42,7 +42,7 @@ import tomllib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-CFG = tomllib.loads((HERE / "swarm.toml").read_text(encoding="utf-8"))
+CFG = tomllib.loads(Path(os.environ.get("SWARM_CONFIG", HERE / "swarm.toml")).read_text(encoding="utf-8"))
 DATA = Path(CFG["scan"]["data_dir"])
 CLASSES_DIR = HERE / "references" / "attack-classes"
 PLAYBOOK_MAX_CHARS = int(CFG["scan"].get("playbook_max_chars", 60000))

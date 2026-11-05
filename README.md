@@ -34,6 +34,10 @@ verifier yields `unverified`, never `confirmed`).
 
 ## Requirements
 
+**Devin:** a native skill + Python dynamic-workflow port is available; see
+[DEVIN.md](DEVIN.md) for installation, approval gates and differences. The requirements
+below describe the original CLI.
+
 - Python 3.11+ (uses `tomllib`)
 - [`ripgrep`](https://github.com/BurntSushi/ripgrep) (`rg`) on `PATH`
 - `git` (the scanner snapshots committed `HEAD` with `git archive`; uncommitted work is not scanned)
