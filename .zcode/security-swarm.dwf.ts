@@ -279,6 +279,10 @@ const BUILTIN_EXCLUDES = [
   "**/*.bin", "**/*.pyc", "**/*.class", "**/*.jar", "**/*.ipa", "**/*.apk",
 ];
 
+/** A selector matching more files than this is a plan error (forces a re-plan),
+ *  like swarm.py's selector caps — never a silently partial scan. */
+const SELECTOR_FILE_CAP = 500;
+
 /** Convert a ripgrep -g style glob to a regex tested against workspace-relative paths. */
 function globToRe(glob: string): RegExp {
   let out = "";
@@ -314,8 +318,8 @@ function globToRe(glob: string): RegExp {
 // ---------------------------------------------------------------------------
 
 const notes = typeof args.notes === "string" ? args.notes : "";
-const batchSize = typeof args.batchSize === "number" && args.batchSize > 0 ? args.batchSize : 5;
-const maxBatches = typeof args.maxBatches === "number" && args.maxBatches > 0 ? args.maxBatches : 8;
+const batchSize = typeof args.batchSize === "number" && Number.isInteger(args.batchSize) && args.batchSize > 0 ? args.batchSize : 5;
+const maxBatches = typeof args.maxBatches === "number" && Number.isInteger(args.maxBatches) && args.maxBatches > 0 ? args.maxBatches : 8;
 // Set by an amendment re-planning with owner feedback; empty on a first run.
 const replanFeedback = "";
 
@@ -456,7 +460,12 @@ for (const sel of plan.selectors) {
     ok = false;
     error = String(err).slice(0, 300);
   }
-  outcomes.push({ sel, ok, error, paths: [...paths].filter((p) => !isExcluded(p)) });
+  const matched = [...paths].filter((p) => !isExcluded(p));
+  if (ok && matched.length > SELECTOR_FILE_CAP) {
+    ok = false;
+    error = `matched ${matched.length} files — over the ${SELECTOR_FILE_CAP}-file cap; tighten the globs`;
+  }
+  outcomes.push({ sel, ok, error, paths: matched });
 }
 
 const selectedSet = new Set<string>();
@@ -722,7 +731,11 @@ if (kept.length === 0) {
     };
     reduced = {
       summary: `REDUCER FAILED (${String(err).slice(0, 200)}). The findings below are raw and undeduplicated: one issue may appear once per batch, and priorities are the workers' severities mapped mechanically. Re-run the reduce before treating counts as authoritative.`,
-      findings: kept.map((k, i) => ({
+      // Outside-fact findings stay unvalidated ONLY (no priority, no verifier):
+      // a source-only verifier could only guess at the missing fact.
+      findings: kept
+        .filter((k) => k.finding.needs_outside_fact === "")
+        .map((k, i) => ({
         id: "R" + String(i + 1),
         priority: sevToPriority[k.finding.severity] ?? "P3",
         title: k.finding.title,
@@ -951,6 +964,28 @@ const reportFindings: ReportFinding[] = [
       evidence: (v === undefined ? "no verdict recorded" : v.reason) + ` Data flow: ${f.path}`,
       status: "unconfirmed" as const,
       severity: sevOf(f.priority),
+    };
+  }),
+  ...confirmedChains.map((c) => {
+    const v = verdicts.get(c.id);
+    return {
+      where: `chain ${c.id}: ${c.steps.join(" -> ")}`,
+      what: `${c.title} — ${c.impact}`,
+      evidence:
+        (v === undefined ? "" : v.reason + " ") +
+        (v !== undefined && v.evidence.length > 0 ? `${v.evidence[0]?.path}:${v.evidence[0]?.lines} ${v.evidence[0]?.quote}` : "member findings verified individually"),
+      status: "verified" as const,
+      severity: sevOf(c.priority),
+    };
+  }),
+  ...unverifiedChains.map((c) => {
+    const v = verdicts.get(c.id);
+    return {
+      where: `chain ${c.id}: ${c.steps.join(" -> ")}`,
+      what: `${c.title} — ${c.impact} (unverified chain)`,
+      evidence: (v === undefined ? "no verdict recorded" : v.reason) + ` Steps: ${c.steps.join(" -> ")}`,
+      status: "unconfirmed" as const,
+      severity: sevOf(c.priority),
     };
   }),
 ];
