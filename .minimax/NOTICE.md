@@ -10,7 +10,7 @@ This directory holds the **MiniMax Code port** of Security Swarm.
 - Port date: 2026-10-19 … 2026-10-22; synced 2026-10-29 with the upstream attack-playbook / coverage-ledger / unvalidated merge
 
 The upstream and this port are the same project by the same author
-(MIT, "Copyright (c) 2026 Caspar (PawCommit Studio)"), so this notice records **what the port
+(MIT, "Copyright (c) 2026 PawCommit Studio"), so this notice records **what the port
 changes**, not a third-party attribution.
 
 ## What the port changes

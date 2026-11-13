@@ -10,7 +10,7 @@ This directory holds the **ZCode dynamic-workflow port** of Security Swarm.
 - Port date: 2026-11-01 (live adaptation); published 2026-11-05
 
 The upstream and this port are the same project by the same author
-(MIT, "Copyright (c) 2026 Caspar (PawCommit Studio)"), so this notice records **what the port
+(MIT, "Copyright (c) 2026 PawCommit Studio"), so this notice records **what the port
 changes**, not a third-party attribution.
 
 ## What the port changes
